@@ -1,0 +1,91 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python virtual environments
+venv/
+env/
+ENV/
+virtualenv/
+.venv/
+.env/
+
+# Models and data
+models/
+*.model
+*.pkl
+*.h5
+*.pt
+*.pth
+*.onnx
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+package-lock.json
+yarn.lock
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Log files
+*.log
+logs/
+log/
+
+# Spark
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Data files (optional, uncomment if needed)
+# *.csv
+# *.json
+# *.xlsx
+# *.xls
+# *.db
+# *.sqlite3
+
+# IDE specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temporary files
+tmp/
+temp/
+.coverage
+htmlcov/
+.pytest_cache/
