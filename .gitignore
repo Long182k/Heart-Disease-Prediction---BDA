@@ -27,6 +27,8 @@ env/
 ENV/
 virtualenv/
 .venv/
+.flask_venv/
+flask_venv/
 .env/
 
 # Models and data

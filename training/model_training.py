@@ -69,7 +69,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
         grid_search = GridSearchCV(
             model, 
             param_grids[name], 
-            cv=5, 
+            cv=5,  # 5-fold cross-validation 
             scoring='roc_auc', 
             n_jobs=-1,
             verbose=1
