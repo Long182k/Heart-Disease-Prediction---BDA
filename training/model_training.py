@@ -61,7 +61,12 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
     base_models = {
         'logistic_regression': LogisticRegression(random_state=42, max_iter=1000),
         'random_forest': RandomForestClassifier(random_state=42),
-        'xgboost': xgb.XGBClassifier(random_state=42)
+        'xgboost': xgb.XGBClassifier(
+            random_state=42,
+            tree_method='gpu_hist',  # Use GPU acceleration
+            gpu_id=0,                # Specify GPU device ID
+            predictor='gpu_predictor' # Use GPU for prediction
+        )
     }
     
     metrics_list = []
@@ -93,7 +98,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
         best_params = grid_search.best_params_
         
         # Apply probability calibration
-        calibrated_model = CalibratedClassifierCV(best_model, cv=5, method='isotonic')
+        calibrated_model = CalibratedClassifierCV(best_model, cv=10, method='isotonic')
         calibrated_model.fit(X_train, y_train)
         
         # Save both models

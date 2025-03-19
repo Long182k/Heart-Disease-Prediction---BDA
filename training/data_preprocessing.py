@@ -25,6 +25,7 @@ def create_spark_session(app_name="HeartDiseasePreprocessing"):
         .appName(app_name) \
         .config("spark.driver.memory", "2g") \
         .config("spark.executor.memory", "2g") \
+        .config("spark.rapids.sql.enabled", "true") \
         .master("local[*]") \
         .getOrCreate()
 
@@ -77,8 +78,16 @@ def preprocess_data(file_path):
         
         print("Applying SMOTE for class balancing...")
         # Apply SMOTE for class imbalance
-        smote = SMOTE(random_state=42)
-        X_resampled, y_resampled = smote.fit_resample(X, y)
+        # Try to use GPU-accelerated SMOTE if available
+        try:
+            from cuml.sampling import SMOTE as GPU_SMOTE
+            print("Using GPU-accelerated SMOTE...")
+            smote = GPU_SMOTE(random_state=42)
+            X_resampled, y_resampled = smote.fit_resample(X, y)
+        except ImportError:
+            print("GPU SMOTE not available, falling back to CPU implementation...")
+            smote = SMOTE(random_state=42)
+            X_resampled, y_resampled = smote.fit_resample(X, y)
         
         # Split into train and test sets
         X_train, X_test, y_train, y_test = train_test_split(
