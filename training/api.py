@@ -106,52 +106,40 @@ def preprocess_input(input_data):
         return None
 
 # Routes
+from flask import Flask, request, jsonify
+import joblib
+import json
+
+app = Flask(__name__)
+
+# Load models and metrics
+models = {
+    'logistic_regression': joblib.load('models/logistic_regression.pkl'),
+    'random_forest': joblib.load('models/random_forest.pkl'),
+    'xgboost': joblib.load('models/xgboost.pkl')
+}
+
+with open('models/model_metrics.json', 'r') as f:
+    model_metrics = json.load(f)
+
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    """Make a prediction for heart disease."""
-    if model is None:
-        return jsonify({'error': 'Model not loaded. Please initialize the model first.'}), 500
+    input_data = request.json
+    model_name = input_data.get('model_name', 'logistic_regression')
+    model = models.get(model_name)
     
-    try:
-        # Get input data from request
-        input_data = request.json
-        
-        # Preprocess input data
-        processed_df = preprocess_input(input_data)
-        if processed_df is None:
-            return jsonify({'error': 'Error preprocessing input data'}), 400
-        
-        # Make prediction
-        prediction = model.transform(processed_df)
-        
-        # Extract prediction result
-        result = prediction.select('prediction', 'probability').collect()[0]
-        
-        # Convert NumPy data types to Python native types for JSON serialization
-        prediction_value = float(result['prediction'])
-        probability = result['probability'].toArray().tolist()
-        
-        response = {
-            'prediction': prediction_value,
-            'probability': probability,
-            'predicted_class': 'Heart Disease Present' if prediction_value == 1 else 'No Heart Disease',
-            'model_type': model_type
-        }
-        
-        return jsonify(response)
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
+    if not model:
+        return jsonify({'error': 'Model not found'}), 404
+    
+    prediction = model.predict([input_data['features']])
+    return jsonify({'prediction': prediction[0]})
 
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():
-    """Get model metrics."""
-    metrics_file = '../models/model_metrics.json'
-    if os.path.exists(metrics_file):
-        with open(metrics_file, 'r') as f:
-            metrics_list = json.load(f)
-        return jsonify(metrics_list)
-    else:
-        return jsonify({'error': 'Metrics file not found'}), 404
+    return jsonify(model_metrics)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000, debug=True)
 
 @app.route('/api/features', methods=['GET'])
 def get_features():

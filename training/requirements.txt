@@ -3,14 +3,10 @@ kagglehub==0.2.5
 matplotlib==3.7.1
 seaborn==0.12.2
 pandas==1.5.3
-numpy==1.23.5
+numpy==1.26.4
 scikit-learn==1.2.2
 xgboost==1.7.5
 imbalanced-learn==0.10.1
 joblib==1.2.0
 flask==2.2.3
 flask-cors==3.0.10
-# GPU acceleration
-cudf-cu11==22.12.*
-cuml-cu11==22.12.*
-cupy-cuda11x==11.6.0

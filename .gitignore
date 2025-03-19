@@ -38,6 +38,8 @@ models/
 *.pth
 *.onnx
 
+data/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
