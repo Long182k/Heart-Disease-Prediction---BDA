@@ -1,0 +1,74 @@
+/* Custom styles for Heart Disease Prediction App */
+
+.hero-section {
+  background: linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url('heart-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  padding: 80px 0;
+  color: white;
+  margin-bottom: 30px;
+}
+
+.hero-section h1 {
+  font-size: 2.5rem;
+  margin-bottom: 20px;
+}
+
+.prediction-form {
+  background-color: #f8f9fa;
+  border-radius: 10px;
+  padding: 30px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.card-dashboard {
+  transition: transform 0.3s;
+  margin-bottom: 20px;
+}
+
+.card-dashboard:hover {
+  transform: translateY(-5px);
+}
+
+.result-panel {
+  padding: 30px;
+  border-radius: 10px;
+  margin-top: 20px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.result-high {
+  background-color: #f8d7da;
+  border: 1px solid #f5c6cb;
+}
+
+.result-moderate {
+  background-color: #fff3cd;
+  border: 1px solid #ffeeba;
+}
+
+.result-low {
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+}
+
+.metric-card {
+  padding: 20px;
+  border-radius: 10px;
+  margin-bottom: 20px;
+  background-color: #f8f9fa;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.model-metrics-container {
+  margin-top: 30px;
+}
+
+.header-nav {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.footer {
+  margin-top: 100px;
+  box-shadow: 0 -2px 4px rgba(0, 0, 0, 0.05);
+}

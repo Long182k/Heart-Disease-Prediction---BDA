@@ -65,6 +65,10 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
     for name, model in base_models.items():
         print(f"Training {name} with cross-validation...")
         
+        # Track training time
+        import time
+        start_time = time.time()
+        
         # Perform grid search with cross-validation
         grid_search = GridSearchCV(
             model, 
@@ -76,6 +80,9 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
         )
         
         grid_search.fit(X_train, y_train)
+        
+        # Calculate training time
+        training_time = time.time() - start_time
         
         # Get best model
         best_model = grid_search.best_estimator_
@@ -149,6 +156,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
             'recall': float(recall),
             'f1': float(f1),
             'auc': float(auc),
+            'training_time': float(training_time),
             'best_params': best_params
         }
         metrics_list.append(metrics)
@@ -170,6 +178,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
     accuracies = [m['accuracy'] for m in metrics_list]
     aucs = [m['auc'] for m in metrics_list]
     f1_scores = [m['f1'] for m in metrics_list]
+    training_times = [m['training_time'] for m in metrics_list]  # Use actual training times
     
     # Create figure with two subplots
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
@@ -189,10 +198,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
     ax1.legend()
     ax1.set_ylim(0, 1.0)
     
-    # You could add training times if you track them during training
-    # For now, using placeholder data
-    training_times = [0.5, 38, 20]  # Example times in seconds
-    
+    # Use actual training times
     ax2.bar(model_names, training_times, color='#ff7f0e')
     ax2.set_ylabel('Time (seconds)')
     ax2.set_title('Training Times')
