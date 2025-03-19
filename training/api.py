@@ -42,7 +42,7 @@ feature_columns = None
 
 def load_model():
     """Load the trained model."""
-    global model, model_type, feature_columns
+    global model, model_type, feature_columns, optimal_threshold
     
     # Get the model metrics to find the best model
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,15 +56,29 @@ def load_model():
         best_metric = max(metrics_list, key=lambda x: x['auc'])
         model_type = best_metric['model_name']
         
-        # Load the model using joblib
-        model_path = os.path.join(base_dir, f'models/best_model_{model_type}.joblib')
+        # Get the optimal threshold if available
+        optimal_threshold = best_metric.get('optimal_threshold', 0.5)
+        
+        # Load the calibrated model using joblib
+        model_path = os.path.join(base_dir, f'models/calibrated_model_{model_type}.joblib')
         if os.path.exists(model_path):
             try:
                 model = joblib.load(model_path)
-                print(f"Loaded {model_type} model from {model_path}")
+                print(f"Loaded calibrated {model_type} model from {model_path}")
+                print(f"Using optimal threshold: {optimal_threshold}")
                 return True
             except Exception as e:
-                print(f"Error loading model: {e}")
+                print(f"Error loading calibrated model: {e}")
+                
+                # Fallback to uncalibrated model
+                uncalibrated_path = os.path.join(base_dir, f'models/best_model_{model_type}.joblib')
+                if os.path.exists(uncalibrated_path):
+                    try:
+                        model = joblib.load(uncalibrated_path)
+                        print(f"Loaded uncalibrated {model_type} model from {uncalibrated_path}")
+                        return True
+                    except Exception as e:
+                        print(f"Error loading uncalibrated model: {e}")
     
     return False
 
@@ -170,6 +184,7 @@ def preprocess_input(input_data):
         print(f"Error preprocessing input: {e}")
         return None
 
+# In the predict function, update the prediction logic:
 @app.route('/api/predict', methods=['POST'])
 def predict():
     try:
@@ -214,12 +229,26 @@ def predict():
         # Make prediction
         try:
             prediction = model.predict(features)[0]
+            print("prediction", prediction)
             probability = model.predict_proba(features)[0][1]
+            
+            # Use optimal threshold if available, otherwise use default thresholds
+            if 'optimal_threshold' in globals() and optimal_threshold is not None:
+                prediction = 1 if probability >= optimal_threshold else 0
+                print(f"Using optimal threshold {optimal_threshold} for prediction")
+            
+            # Determine risk level based on probability thresholds
+            if probability < 0.3:
+                risk_level = "Low"
+            elif probability < 0.6:
+                risk_level = "Moderate"
+            else:
+                risk_level = "High"
             
             return jsonify({
                 'prediction': int(prediction),
                 'probability': float(probability),
-                'risk_level': 'High' if prediction == 1 else 'Low',
+                'risk_level': risk_level,
                 'model_used': model_type
             })
         except Exception as e:

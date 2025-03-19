@@ -43,17 +43,21 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
             'n_estimators': [100, 200],
             'max_depth': [10, 15, 20],
             'min_samples_split': [2, 5],
-            'max_features': ['sqrt', 'log2']
+            'max_features': ['sqrt', 'log2'],
+            'class_weight': ['balanced', None]  # Add class weight parameter
         },
         'xgboost': {
             'n_estimators': [50, 100],
             'max_depth': [3, 5, 7],
             'learning_rate': [0.01, 0.1],
-            'subsample': [0.7, 0.9]
+            'subsample': [0.7, 0.9],
+            'scale_pos_weight': [1, 3, 5]  # Add weight for positive class
         }
     }
     
     # Initialize base models
+    from sklearn.calibration import CalibratedClassifierCV
+    
     base_models = {
         'logistic_regression': LogisticRegression(random_state=42, max_iter=1000),
         'random_forest': RandomForestClassifier(random_state=42),
@@ -73,7 +77,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
         grid_search = GridSearchCV(
             model, 
             param_grids[name], 
-            cv=5,  # 5-fold cross-validation 
+            cv=10,  # 10-fold cross-validation (increased from 5)
             scoring='roc_auc', 
             n_jobs=-1,
             verbose=1
@@ -87,6 +91,53 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
         # Get best model
         best_model = grid_search.best_estimator_
         best_params = grid_search.best_params_
+        
+        # Apply probability calibration
+        calibrated_model = CalibratedClassifierCV(best_model, cv=5, method='isotonic')
+        calibrated_model.fit(X_train, y_train)
+        
+        # Save both models
+        model_path = os.path.join(base_dir, f'models/best_model_{name}.joblib')
+        calibrated_model_path = os.path.join(base_dir, f'models/calibrated_model_{name}.joblib')
+        
+        joblib.dump(best_model, model_path)
+        joblib.dump(calibrated_model, calibrated_model_path)
+        
+        # Use calibrated model for predictions
+        y_pred = calibrated_model.predict(X_test)
+        y_prob = calibrated_model.predict_proba(X_test)[:, 1]
+        
+        # Calculate metrics
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred)
+        recall = recall_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
+        auc = roc_auc_score(y_test, y_prob)
+        
+        # Find optimal threshold based on F1 score
+        thresholds = np.arange(0.1, 0.9, 0.05)
+        f1_scores = []
+        
+        for threshold in thresholds:
+            y_pred_threshold = (y_prob >= threshold).astype(int)
+            f1_scores.append(f1_score(y_test, y_pred_threshold))
+        
+        optimal_threshold = thresholds[np.argmax(f1_scores)]
+        print(f"Optimal threshold for {name}: {optimal_threshold:.2f}")
+        
+        # Store metrics
+        metrics = {
+            'model_name': name,
+            'accuracy': float(accuracy),
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1': float(f1),
+            'auc': float(auc),
+            'training_time': float(training_time),
+            'best_params': best_params,
+            'optimal_threshold': float(optimal_threshold)
+        }
+        metrics_list.append(metrics)
         
         # Make predictions
         y_pred = best_model.predict(X_test)
