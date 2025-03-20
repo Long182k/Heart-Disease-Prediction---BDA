@@ -33,6 +33,8 @@ flask_venv/
 
 # Models and data
 models/
+models_2/
+models_3_colabs/
 *.model
 *.pkl
 *.h5

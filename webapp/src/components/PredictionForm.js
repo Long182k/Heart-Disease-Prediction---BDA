@@ -141,10 +141,25 @@ const PredictionForm = () => {
     mutationFn: (data) => {
       // Convert age from years to days (multiply by 365.25 to account for leap years)
       const ageInDays = Math.round(parseFloat(data.age) * 365.25);
-      
+  
+      // Calculate BMI if needed
+      const bmi = (parseFloat(data.weight) / ((parseFloat(data.height) / 100) ** 2)).toFixed(1);
+  
+      // Determine blood pressure category
+      let bp_category = "Unknown";
+      if (data.ap_hi < 120 && data.ap_lo < 80) {
+        bp_category = "Normal";
+      } else if (data.ap_hi < 130 && data.ap_lo < 80) {
+        bp_category = "Elevated";
+      } else if (data.ap_hi < 140 || data.ap_lo < 90) {
+        bp_category = "Hypertension Stage 1";
+      } else {
+        bp_category = "Hypertension Stage 2";
+      }
+  
       // Ensure all required fields are present and convert to correct types
       const processedData = {
-        age: ageInDays, // Send age in days to the API
+        age_years: parseInt(data.age), // Send age in years to the API
         gender: parseInt(data.gender),
         height: parseInt(data.height),
         weight: parseFloat(data.weight),
@@ -154,7 +169,9 @@ const PredictionForm = () => {
         gluc: parseInt(data.gluc),
         smoke: parseInt(data.smoke),
         alco: parseInt(data.alco),
-        active: parseInt(data.active)
+        active: parseInt(data.active),
+        bmi: parseFloat(bmi),
+        bp_category: bp_category
       };
       return apiService.makePrediction(processedData);
     },

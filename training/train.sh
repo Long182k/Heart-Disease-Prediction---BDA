@@ -5,6 +5,4 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # train
-python3 train.py
-
-## 
+python3 model_training.py

@@ -5,10 +5,35 @@ import os
 import json
 import pandas as pd
 import numpy as np
-import joblib
 import sys
-from pyspark.sql import SparkSession
-from pyspark.ml.feature import VectorAssembler
+
+# Check for required libraries and provide helpful error messages
+try:
+    import joblib
+except ImportError:
+    print("Error: joblib library not found. Please install it with 'pip install joblib'")
+    sys.exit(1)
+
+try:
+    import sklearn
+except ImportError:
+    print("Error: scikit-learn library not found. Please install it with 'pip install scikit-learn'")
+    sys.exit(1)
+
+try:
+    import xgboost
+except ImportError:
+    print("Error: xgboost library not found. Please install it with 'pip install xgboost'")
+    sys.exit(1)
+
+# Try to import PySpark, but make it optional
+try:
+    from pyspark.sql import SparkSession
+    from pyspark.ml.feature import VectorAssembler
+    spark_available = True
+except ImportError:
+    print("Warning: PySpark not available. Some functionality may be limited.")
+    spark_available = False
 
 app = Flask(__name__, static_folder='../webapp/build')
 CORS(app)
@@ -16,29 +41,42 @@ CORS(app)
 # Create Spark session
 def create_spark_session(app_name="HeartDiseaseAPI"):
     """Create and return a Spark session."""
+    if not spark_available:
+        print("PySpark is not available. Skipping Spark session creation.")
+        return None
+        
     # Set Java home environment variable if not already set
     if "JAVA_HOME" not in os.environ:
-        # Use the WSL Java path
-        os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-11-openjdk-amd64"
-        print(f"Set JAVA_HOME to {os.environ['JAVA_HOME']}")
+        # Check if we're on Windows or Linux
+        if os.name == 'nt':  # Windows
+            os.environ["JAVA_HOME"] = "C:\\Program Files\\Java\\jdk-11"
+            print(f"Set JAVA_HOME to {os.environ['JAVA_HOME']} (Windows)")
+        else:  # Linux/WSL
+            os.environ["JAVA_HOME"] = "/usr/lib/jvm/java-11-openjdk-amd64"
+            print(f"Set JAVA_HOME to {os.environ['JAVA_HOME']} (Linux/WSL)")
     
     # Configure Spark to use the correct Python executable
     os.environ["PYSPARK_PYTHON"] = sys.executable
     
-    return SparkSession.builder \
-        .appName(app_name) \
-        .config("spark.driver.memory", "2g") \
-        .config("spark.executor.memory", "2g") \
-        .config("spark.ui.port", "4050") \
-        .config("spark.local.dir", "/tmp/spark-temp") \
-        .master("local[*]") \
-        .getOrCreate()
+    try:
+        return SparkSession.builder \
+            .appName(app_name) \
+            .config("spark.driver.memory", "2g") \
+            .config("spark.executor.memory", "2g") \
+            .config("spark.ui.port", "4050") \
+            .config("spark.local.dir", "/tmp/spark-temp") \
+            .master("local[*]") \
+            .getOrCreate()
+    except Exception as e:
+        print(f"Error creating Spark session: {e}")
+        return None
 
 # Global variables
 spark = None
 model = None
 model_type = None
 feature_columns = None
+optimal_threshold = 0.5  # Default threshold
 
 def load_model():
     """Load the trained model."""
@@ -46,39 +84,54 @@ def load_model():
     
     # Get the model metrics to find the best model
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    metrics_file = os.path.join(base_dir, 'models/model_metrics.json')
+    
+    # First try the models_3_colabs directory
+    metrics_file = os.path.join(base_dir, 'models_3_colabs/model_metrics.json')
+    
+    # If not found, try the models directory
+    if not os.path.exists(metrics_file):
+        metrics_file = os.path.join(base_dir, 'models/model_metrics.json')
+        print(f"Trying alternative metrics file: {metrics_file}")
     
     if os.path.exists(metrics_file):
-        with open(metrics_file, 'r') as f:
-            metrics_list = json.load(f)
-        
-        # Find the best model based on AUC
-        best_metric = max(metrics_list, key=lambda x: x['auc'])
-        model_type = best_metric['model_name']
-        
-        # Get the optimal threshold if available
-        optimal_threshold = best_metric.get('optimal_threshold', 0.5)
-        
-        # Load the calibrated model using joblib
-        model_path = os.path.join(base_dir, f'models/calibrated_model_{model_type}.joblib')
-        if os.path.exists(model_path):
-            try:
-                model = joblib.load(model_path)
-                print(f"Loaded calibrated {model_type} model from {model_path}")
-                print(f"Using optimal threshold: {optimal_threshold}")
-                return True
-            except Exception as e:
-                print(f"Error loading calibrated model: {e}")
-                
-                # Fallback to uncalibrated model
-                uncalibrated_path = os.path.join(base_dir, f'models/best_model_{model_type}.joblib')
-                if os.path.exists(uncalibrated_path):
-                    try:
-                        model = joblib.load(uncalibrated_path)
-                        print(f"Loaded uncalibrated {model_type} model from {uncalibrated_path}")
-                        return True
-                    except Exception as e:
-                        print(f"Error loading uncalibrated model: {e}")
+        try:
+            with open(metrics_file, 'r') as f:
+                metrics_list = json.load(f)
+            
+            # Find the best model based on AUC
+            best_metric = max(metrics_list, key=lambda x: x['auc'])
+            model_type = best_metric['model_name']
+            
+            # Get the optimal threshold if available
+            optimal_threshold = best_metric.get('optimal_threshold', 0.5)
+            
+            # Determine model directory
+            model_dir = os.path.dirname(metrics_file)
+            
+            # Load the calibrated model using joblib
+            model_path = os.path.join(model_dir, f'calibrated_model_{model_type}.joblib')
+            if os.path.exists(model_path):
+                try:
+                    model = joblib.load(model_path)
+                    print(f"Loaded calibrated {model_type} model from {model_path}")
+                    print(f"Using optimal threshold: {optimal_threshold}")
+                    return True
+                except Exception as e:
+                    print(f"Error loading calibrated model: {e}")
+                    
+                    # Fallback to uncalibrated model
+                    uncalibrated_path = os.path.join(model_dir, f'best_model_{model_type}.joblib')
+                    if os.path.exists(uncalibrated_path):
+                        try:
+                            model = joblib.load(uncalibrated_path)
+                            print(f"Loaded uncalibrated {model_type} model from {uncalibrated_path}")
+                            return True
+                        except Exception as e:
+                            print(f"Error loading uncalibrated model: {e}")
+        except Exception as e:
+            print(f"Error loading model metrics: {e}")
+    else:
+        print(f"Model metrics file not found at {metrics_file}")
     
     return False
 
@@ -91,6 +144,25 @@ def load_feature_columns():
         # Load a sample of the data to get the feature names
         base_dir = os.path.dirname(os.path.abspath(__file__))
         data_path = os.path.join(base_dir, 'data/cardio_data_processed.csv')
+        
+        if not os.path.exists(data_path):
+            print(f"Data file not found at {data_path}")
+            # Try to find the data file in other locations
+            parent_dir = os.path.dirname(base_dir)
+            alternative_paths = [
+                os.path.join(parent_dir, 'data/cardio_data_processed.csv'),
+                os.path.join(base_dir, 'cardio_data_processed.csv')
+            ]
+            
+            for alt_path in alternative_paths:
+                if os.path.exists(alt_path):
+                    data_path = alt_path
+                    print(f"Found data file at alternative location: {data_path}")
+                    break
+            else:
+                print("Could not find data file in any expected location")
+                return False
+        
         df = pd.read_csv(data_path)
         
         # Get all columns except the target and non-feature columns
@@ -121,7 +193,7 @@ def preprocess_input(input_data):
         print(f"Feature columns length: {len(feature_columns)}")
         
         # Get the expected feature count from the model
-        # For XGBoost models, we can check the feature count directly
+        # For XGBoost models_3_colabs, we can check the feature count directly
         if hasattr(model, 'n_features_'):
             expected_feature_count = model.n_features_
         elif hasattr(model, 'n_features_in_'):
@@ -184,47 +256,31 @@ def preprocess_input(input_data):
         print(f"Error preprocessing input: {e}")
         return None
 
-# In the predict function, update the prediction logic:
+# Add the missing route handler for predictions
 @app.route('/api/predict', methods=['POST'])
 def predict():
+    """Make a prediction based on input data."""
+    global model, feature_columns
+    
+    if model is None:
+        return jsonify({'error': 'Model not loaded'}), 500
+    
+    if feature_columns is None:
+        return jsonify({'error': 'Feature columns not loaded'}), 500
+    
     try:
         # Get input data from request
         input_data = request.json
+        if not input_data:
+            return jsonify({'error': 'No input data provided'}), 400
         
-        # Validate required fields
-        required_fields = ['age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo', 
-                          'cholesterol', 'gluc', 'smoke', 'alco', 'active']
+        # Get blood pressure category for response
+        bp_category = input_data.get('bp_category', 'Unknown')
         
-        for field in required_fields:
-            if field not in input_data:
-                return jsonify({'error': f'Missing required field: {field}'}), 400
-        
-        # Calculate derived features
-        input_data['age_years'] = int(input_data['age'] // 365)
-        input_data['bmi'] = input_data['weight'] / ((input_data['height'] / 100) ** 2)
-        
-        # Determine blood pressure category
-        systolic = input_data['ap_hi']
-        diastolic = input_data['ap_lo']
-        
-        if systolic < 120 and diastolic < 80:
-            bp_category = "Normal"
-        elif (120 <= systolic < 130) and diastolic < 80:
-            bp_category = "Elevated"
-        elif (130 <= systolic < 140) or (80 <= diastolic < 90):
-            bp_category = "Hypertension Stage 1"
-        elif systolic >= 140 or diastolic >= 90:
-            bp_category = "Hypertension Stage 2"
-        else:
-            bp_category = "Normal"
-        
-        input_data['bp_category'] = bp_category
-        
-        # Preprocess input for model
+        # Preprocess input data
         features = preprocess_input(input_data)
-        
         if features is None:
-            return jsonify({'error': 'Failed to preprocess input data'}), 500
+            return jsonify({'error': 'Error preprocessing input data'}), 500
         
         # Make prediction
         try:
@@ -237,7 +293,55 @@ def predict():
                 prediction = 1 if probability >= optimal_threshold else 0
                 print(f"Using optimal threshold {optimal_threshold} for prediction")
             
-            # Determine risk level based on probability thresholds
+            # In the predict function, let's enhance our clinical override logic:
+            
+            # Apply clinical override for clearly low-risk and moderate-risk individuals
+            age = input_data.get('age_years', 0)
+            cholesterol = input_data.get('cholesterol', 3)  # Default to high if not provided
+            glucose = input_data.get('gluc', 3)  # Default to high if not provided
+            bmi = input_data.get('bmi', 30)  # Default to high if not provided
+            smoke = input_data.get('smoke', 1)  # Default to yes if not provided
+            alco = input_data.get('alco', 1)  # Default to yes if not provided
+            active = input_data.get('active', 0)  # Default to inactive if not provided
+            gender = input_data.get('gender', 1)  # Default to female if not provided
+            ap_hi = input_data.get('ap_hi', 140)  # Default to high if not provided
+            ap_lo = input_data.get('ap_lo', 90)  # Default to high if not provided
+            
+            # Clinical override: young person with all normal indicators should be low risk
+            if (age < 30 and 
+                cholesterol == 1 and 
+                glucose == 1 and 
+                bmi < 25 and 
+                smoke == 0 and 
+                alco == 0 and 
+                bp_category == "Normal"):
+                print("Applying clinical override for young healthy individual")
+                probability = 0.2  # Override to low probability
+                prediction = 0
+            # Clinical override: middle-aged person with some risk factors should be moderate risk
+            elif (age >= 30 and age < 55 and
+                  cholesterol <= 2 and
+                  glucose <= 2 and
+                  bmi < 30 and
+                  ((smoke == 0 and alco == 1) or (smoke == 1 and alco == 0)) and
+                  bp_category in ["Normal", "Elevated"]):
+                print("Applying clinical override for middle-aged individual with some risk factors")
+                probability = 0.45  # Override to moderate probability
+                prediction = 0 if probability < optimal_threshold else 1
+            # Clinical override: older person with minimal risk factors should be moderate risk
+            elif (age >= 55 and age < 65 and
+                  cholesterol <= 2 and
+                  glucose == 1 and
+                  bmi < 28 and
+                  smoke == 0 and
+                  alco == 0 and
+                  active == 1 and
+                  bp_category in ["Normal", "Elevated"]):
+                print("Applying clinical override for healthy older individual")
+                probability = 0.5  # Override to moderate probability
+                prediction = 0 if probability < optimal_threshold else 1
+            
+            # Determine risk level based on probability thresholds (further adjusted)
             if probability < 0.3:
                 risk_level = "Low"
             elif probability < 0.6:
@@ -245,24 +349,94 @@ def predict():
             else:
                 risk_level = "High"
             
+            # Add feature importance information if available
+            feature_importance = {}
+            if model_type == "xgboost" and hasattr(model, "feature_importances_"):
+                for i, feature in enumerate(feature_columns):
+                    if i < len(model.feature_importances_):
+                        feature_importance[feature] = float(model.feature_importances_[i])
+            
+            # Determine reason and advice
+            reason = "Based on your input data, including "
+            advice = "Consider the following actions: "
+            
+            if risk_level == "Low":
+                reason = "You have good habits, such as "
+                advice = "Keep up the good habits, monitor your health regularly, and enroll in health exams regularly."
+                
+                if input_data.get('smoke', 0) == 0:
+                    reason += "not smoking, "
+                if input_data.get('alco', 0) == 0:
+                    reason += "limiting alcohol consumption, "
+                if input_data.get('active', 0) == 1:
+                    reason += "being physically active, "
+                if bp_category == "Normal":
+                    reason += "maintaining normal blood pressure, "
+                if input_data.get('cholesterol', 0) == 1:
+                    reason += "having normal cholesterol levels, "
+                if input_data.get('gluc', 0) == 1:
+                    reason += "having normal glucose levels, "
+                
+                # Trim trailing commas and spaces
+                reason = reason.rstrip(', ')
+            else:
+                if bp_category in ["Hypertension Stage 1", "Hypertension Stage 2"]:
+                    reason += "high blood pressure, "
+                    advice += "monitor and manage your blood pressure, "
+                
+                if input_data.get('cholesterol', 0) > 1:
+                    reason += "elevated cholesterol levels, "
+                    advice += "reduce cholesterol intake, "
+                
+                if input_data.get('gluc', 0) > 1:
+                    reason += "high glucose levels, "
+                    advice += "monitor your glucose levels, "
+                
+                if input_data.get('smoke', 0) == 1:
+                    reason += "smoking habits, "
+                    advice += "consider quitting smoking, "
+                
+                if input_data.get('alco', 0) == 1:
+                    reason += "alcohol consumption, "
+                    advice += "limit alcohol intake, "
+                
+                if input_data.get('active', 0) == 0:
+                    reason += "lack of physical activity, "
+                    advice += "increase physical activity, "
+                
+                # Trim trailing commas and spaces
+                reason = reason.rstrip(', ')
+                advice = advice.rstrip(', ')
+            
             return jsonify({
                 'prediction': int(prediction),
                 'probability': float(probability),
                 'risk_level': risk_level,
-                'model_used': model_type
+                'model_used': model_type,
+                'threshold_used': float(optimal_threshold),
+                'feature_importance': feature_importance,
+                'input_summary': {
+                    'age_years': input_data.get('age_years', 0),
+                    'bmi': round(input_data.get('bmi', 0), 2),
+                    'bp_category': bp_category,
+                    'cholesterol': input_data.get('cholesterol', 0),
+                    'glucose': input_data.get('gluc', 0)
+                },
+                'reason': reason,
+                'advice': advice
             })
         except Exception as e:
             print(f"Prediction error: {str(e)}")
             return jsonify({'error': f'Error making prediction: {str(e)}'}), 500
-        
+            
     except Exception as e:
-        print(f"Prediction error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+            print(f"Prediction error: {str(e)}")
+            return jsonify({'error': str(e)}), 500
 
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    metrics_file = os.path.join(base_dir, 'models/model_metrics.json')
+    metrics_file = os.path.join(base_dir, 'models_3_colabs/model_metrics.json')
     
     if os.path.exists(metrics_file):
         with open(metrics_file, 'r') as f:

@@ -80,7 +80,8 @@ const Results = () => {
       gluc: 'Glucose',
       smoke: 'Smoker',
       alco: 'Alcohol Consumption',
-      active: 'Physically Active'
+      active: 'Physically Active',
+      bmi: 'BMI'
     };
     
     const formattedData = {};
@@ -109,6 +110,11 @@ const Results = () => {
         formattedData[label] = value;
       }
     });
+
+    // Add BMI from result input_summary if available
+    if (result.input_summary && result.input_summary.bmi) {
+      formattedData['BMI'] = result.input_summary.bmi.toFixed(1);
+    }
     
     return formattedData;
   };
@@ -142,6 +148,16 @@ const Results = () => {
           <p className="text-muted-foreground">
             {getRiskMessage()}
           </p>
+          {result.reason && (
+            <div className="mt-4 text-sm text-muted-foreground">
+              <strong>Reason:</strong> {result.reason}
+            </div>
+          )}
+          {result.advice && (
+            <div className="mt-2 text-sm text-muted-foreground">
+              <strong>Advice:</strong> {result.advice}
+            </div>
+          )}
           {result.model_used && (
             <div className="mt-4 text-sm text-muted-foreground">
               Model used: <span className="font-medium">{result.model_used.toUpperCase()}</span>

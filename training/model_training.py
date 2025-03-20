@@ -65,7 +65,9 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
             random_state=42,
             tree_method='gpu_hist',  # Use GPU acceleration
             gpu_id=0,                # Specify GPU device ID
-            predictor='gpu_predictor' # Use GPU for prediction
+            predictor='gpu_predictor', # Use GPU for prediction
+            enable_categorical=True   # Enable categorical feature support
+            # Removed use_label_encoder parameter as it's deprecated
         )
     }
     
@@ -219,7 +221,15 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
     
     # Save metrics to JSON
     metrics_path = os.path.join(base_dir, 'models/model_metrics.json')
-    with open(metrics_path, 'w') as f:
+    # When writing model metrics to JSON, modify the model name to indicate calibration status
+    for i, metrics in enumerate(metrics_list):
+        if "optimal_threshold" in metrics:
+            metrics["model_name"] = f"{metrics['model_name']}_calibrated"
+        else:
+            metrics["model_name"] = f"{metrics['model_name']}_uncalibrated"
+            
+    # Write the updated metrics to the JSON file
+    with open(os.path.join(output_dir, 'model_metrics.json'), 'w') as f:
         json.dump(metrics_list, f, indent=2)
     print(f"Saved metrics to {metrics_path}")
     
