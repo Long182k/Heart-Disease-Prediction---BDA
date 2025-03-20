@@ -229,7 +229,7 @@ def train_models_with_cv(X_train, y_train, X_test, y_test):
             metrics["model_name"] = f"{metrics['model_name']}_uncalibrated"
             
     # Write the updated metrics to the JSON file
-    with open(os.path.join(output_dir, 'model_metrics.json'), 'w') as f:
+    with open(os.path.join(base_dir, 'model_metrics.json'), 'w') as f:
         json.dump(metrics_list, f, indent=2)
     print(f"Saved metrics to {metrics_path}")
     
