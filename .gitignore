@@ -28,7 +28,7 @@ ENV/
 virtualenv/
 .venv/
 .env/
-
+.Dataset/*
 # Models and data
 models/
 *.model
@@ -37,6 +37,8 @@ models/
 *.pt
 *.pth
 *.onnx
+*.csv
+*.csv.zip
 
 # Jupyter Notebook
 .ipynb_checkpoints
