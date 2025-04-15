@@ -284,20 +284,20 @@ def create_spark_feature_pipeline(categorical_cols, numeric_cols):
     if categorical_cols:
         # String indexers for categorical columns
         indexers = [
-            StringIndexer(inputCol=col, outputCol=f"{col}_indexed", handleInvalid="keep")
+            StringIndexer(inputCol=col, outputCol=f"{col}_idx", handleInvalid="keep")
             for col in categorical_cols
         ]
         stages.extend(indexers)
         
         # One-hot encode indexed categorical columns
         encoder = SparkOneHotEncoder(
-            inputCols=[f"{col}_indexed" for col in categorical_cols],
-            outputCols=[f"{col}_encoded" for col in categorical_cols]
+            inputCols=[f"{col}_idx" for col in categorical_cols],
+            outputCols=[f"{col}_vec" for col in categorical_cols]
         )
         stages.append(encoder)
     
     # Combine all features into a single vector column
-    feature_cols = [f"{col}_encoded" for col in categorical_cols] + numeric_cols
+    feature_cols = [f"{col}_vec" for col in categorical_cols] + numeric_cols
     assembler = VectorAssembler(inputCols=feature_cols, outputCol="features", handleInvalid="keep")
     stages.append(assembler)
     

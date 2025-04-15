@@ -44,7 +44,7 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='Cardiovascular Disease Prediction')
     
     parser.add_argument('--data_path', type=str, 
-                        default='Dataset/cardio_data_processed.csv',
+                        default='/kaggle/input/cardiovascular-disease/cardio_data_processed.csv',
                         help='Path to the dataset')
 
     parser.add_argument('--output_dir', type=str, 
@@ -244,6 +244,27 @@ def run_sklearn_workflow(args):
         plt.tight_layout()
         plt.savefig(os.path.join(args.output_dir, 'visualizations', 'model_comparison.png'))
     
+    # Save model metrics in JSON format
+    model_metrics = []
+    for model_name in models:
+        model_metrics.append({
+            "model_name": model_name,
+            "accuracy": float(results[model_name]['Accuracy']),
+            "precision": float(results[model_name]['Precision']),
+            "recall": float(results[model_name]['Recall']),
+            "f1": float(results[model_name]['F1 Score']),
+            "auc": float(results[model_name]['AUC']),
+            "training_time": float(results[model_name]['Training Time']),
+            "best_params": results[model_name].get('Best Parameters', {})
+        })
+    
+    # Save model metrics to JSON file
+    import json
+    with open(os.path.join(args.output_dir, 'results', 'model_metrics.json'), 'w') as f:
+        json.dump(model_metrics, f, indent=2)
+    
+    print(f"Model metrics saved to {os.path.join(args.output_dir, 'results', 'model_metrics.json')}")
+    
     return results
 
 def run_spark_workflow(args):
@@ -252,16 +273,21 @@ def run_spark_workflow(args):
     
     # Create Spark session
     spark = SparkSession.builder \
-    .appName("CardiovascularDiseasePrediction") \
-    .config("spark.executor.memory", "4g") \
-    .config("spark.driver.memory", "4g") \
-    .config("spark.hadoop.security.authentication", "simple") \
-    .getOrCreate()
+        .appName("CardiovascularDiseasePrediction") \
+        .config("spark.executor.memory", "4g") \
+        .config("spark.driver.memory", "4g") \
+        .getOrCreate()
     
     try:
         # Load and preprocess data
         spark_df = load_spark_data(spark, args.data_path)
         spark_df_clean = clean_spark_data(spark_df)
+        
+        # Drop columns ending with '_encoded'
+        columns_to_drop = [col for col in spark_df_clean.columns if col.endswith('_encoded')]
+        if columns_to_drop:
+            spark_df_clean = spark_df_clean.drop(*columns_to_drop)
+            print(f"Dropped {len(columns_to_drop)} encoded columns: {columns_to_drop}")
         
         # Split data
         train_df, val_df, test_df = split_spark_data(spark_df_clean)
@@ -304,6 +330,23 @@ def run_spark_workflow(args):
         print(f"F1 Score: {eval_results['F1 Score']:.4f}")
         print(f"AUC: {eval_results['AUC']:.4f}")
         
+        # Plot confusion matrix and ROC curve for Spark model
+        if 'y_true' in eval_results and 'y_pred' in eval_results:
+            plot_confusion_matrix(
+                eval_results['y_true'],
+                eval_results['y_pred'],
+                output_path=os.path.join(args.output_dir, 'visualizations', 'spark_rf_confusion_matrix.png')
+            )
+            print(f"Confusion matrix saved to {os.path.join(args.output_dir, 'visualizations', 'spark_rf_confusion_matrix.png')}")
+        
+        if 'y_true' in eval_results and 'y_pred_proba' in eval_results:
+            plot_roc_curve(
+                eval_results['y_true'],
+                eval_results['y_pred_proba'],
+                output_path=os.path.join(args.output_dir, 'visualizations', 'spark_rf_roc_curve.png')
+            )
+            print(f"ROC curve saved to {os.path.join(args.output_dir, 'visualizations', 'spark_rf_roc_curve.png')}")
+        
         # Save model
         if args.save_model:
             model.write().overwrite().save(os.path.join(args.output_dir, 'models', 'spark_rf_model'))
@@ -329,6 +372,27 @@ def main():
         results = run_sklearn_workflow(args)
     
     print("\n=== Workflow completed successfully ===\n")
+    
+    # Add code to zip and download output in Kaggle
+    if args.output_dir.startswith('/kaggle/'):
+        try:
+            import zipfile
+            from IPython.display import FileLink
+            
+            # Create zip file of output directory
+            zip_path = '/kaggle/working/output_results.zip'
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for root, dirs, files in os.walk(args.output_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        arcname = os.path.relpath(file_path, os.path.dirname(args.output_dir))
+                        zipf.write(file_path, arcname)
+            
+            print(f"\nOutput directory zipped to {zip_path}")
+            print("You can download it using the FileLink below:")
+            display(FileLink(zip_path))
+        except Exception as e:
+            print(f"Error creating zip file: {e}")
 
 if __name__ == "__main__":
     main()
