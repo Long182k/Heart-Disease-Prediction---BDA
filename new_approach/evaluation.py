@@ -70,56 +70,72 @@ def evaluate_sklearn_model(model, X_test, y_test):
 
 def evaluate_spark_model(model, test_df):
     """
-    Evaluate a Spark ML model on the test set.
+    Evaluate a Spark ML model.
     
     Parameters:
     -----------
-    model : object
-        Trained Spark ML model
+    model : pyspark.ml.PipelineModel
+        Trained Spark ML pipeline model
     test_df : pyspark.sql.DataFrame
         Test DataFrame
         
     Returns:
     --------
     dict
-        Dictionary containing evaluation metrics
+        Evaluation metrics
     """
+    print("Evaluating Spark ML model...")
+    
     # Make predictions
     predictions = model.transform(test_df)
     
-    # Binary classification evaluator for AUC
-    evaluator_auc = BinaryClassificationEvaluator(
-        rawPredictionCol="rawPrediction",
-        labelCol="cardio",
+    # Get binary evaluator
+    evaluator = BinaryClassificationEvaluator(
+        labelCol="cardio", 
+        rawPredictionCol="rawPrediction", 
         metricName="areaUnderROC"
     )
-    auc = evaluator_auc.evaluate(predictions)
     
-    # Multiclass classification evaluator for accuracy, precision, recall, f1
-    evaluator_multi = MulticlassClassificationEvaluator(
-        labelCol="cardio",
+    # Calculate AUC
+    auc = evaluator.evaluate(predictions)
+    
+    # Get multiclass evaluator for other metrics
+    multi_evaluator = MulticlassClassificationEvaluator(
+        labelCol="cardio", 
         predictionCol="prediction"
     )
     
-    accuracy = evaluator_multi.setMetricName("accuracy").evaluate(predictions)
-    precision = evaluator_multi.setMetricName("weightedPrecision").evaluate(predictions)
-    recall = evaluator_multi.setMetricName("weightedRecall").evaluate(predictions)
-    f1 = evaluator_multi.setMetricName("f1").evaluate(predictions)
+    # Calculate accuracy, precision, recall, and F1 score
+    accuracy = multi_evaluator.setMetricName("accuracy").evaluate(predictions)
+    precision = multi_evaluator.setMetricName("weightedPrecision").evaluate(predictions)
+    recall = multi_evaluator.setMetricName("weightedRecall").evaluate(predictions)
+    f1 = multi_evaluator.setMetricName("f1").evaluate(predictions)
     
-    # Convert predictions to Pandas for confusion matrix
-    pred_pd = predictions.select("cardio", "prediction").toPandas()
-    cm = confusion_matrix(pred_pd["cardio"], pred_pd["prediction"])
+    # Convert predictions to pandas for confusion matrix and ROC curve
+    pandas_preds = predictions.select("cardio", "prediction", "probability").toPandas()
+    y_true = pandas_preds["cardio"].values
+    y_pred = pandas_preds["prediction"].values
+    y_pred_proba = np.array([prob[1] for prob in pandas_preds["probability"]])
     
-    # Return metrics
-    return {
-        'Accuracy': accuracy,
-        'Precision': precision,
-        'Recall': recall,
-        'F1 Score': f1,
-        'AUC': auc,
-        'Confusion Matrix': cm,
-        'Predictions': predictions
+    # Calculate confusion matrix
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Create evaluation results dictionary
+    eval_results = {
+        "Accuracy": accuracy,
+        "Precision": precision,
+        "Recall": recall,
+        "F1 Score": f1,
+        "AUC": auc,
+        "Confusion Matrix": cm,
+        "y_true": y_true,
+        "y_pred": y_pred,
+        "y_pred_proba": y_pred_proba,
+        "Classification Report": classification_report(y_true, y_pred)
     }
+    
+    print("Model evaluation completed")
+    return eval_results
 
 def plot_confusion_matrix(y_true, y_pred, output_path=None):
     """

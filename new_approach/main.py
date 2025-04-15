@@ -292,66 +292,172 @@ def run_spark_workflow(args):
         # Split data
         train_df, val_df, test_df = split_spark_data(spark_df_clean)
         
-        # Train model
-        # Note: For simplicity, we're using a basic Random Forest model in Spark
-        from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
-        
         # Define feature columns
         categorical_cols = ['gender', 'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bp_category']
         numeric_cols = ['age_years', 'height', 'weight', 'ap_hi', 'ap_lo', 'bmi']
         
         # Create feature pipeline
         from feature_engineering import create_spark_feature_pipeline
-        pipeline = create_spark_feature_pipeline(categorical_cols, numeric_cols)
+        feature_pipeline = create_spark_feature_pipeline(categorical_cols, numeric_cols)
         
-        # Add Random Forest to the pipeline
+        # Define models to train
+        from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
+        from pyspark.ml.classification import LogisticRegression as SparkLogisticRegression
+        from pyspark.ml.classification import GBTClassifier as SparkGBTClassifier
         from pyspark.ml import Pipeline
-        rf = SparkRandomForestClassifier(
-            labelCol="cardio",
-            featuresCol="scaled_features",
-            numTrees=100,
-            maxDepth=10,
-            seed=42
-        )
         
-        pipeline = Pipeline(stages=pipeline.getStages() + [rf])
+        models = {}
+        results = {}
         
-        # Train model
-        model = pipeline.fit(train_df)
+        if args.model == 'all':
+            models = {
+                'spark_rf': SparkRandomForestClassifier(
+                    labelCol="cardio",
+                    featuresCol="scaled_features",
+                    numTrees=100,
+                    maxDepth=10,
+                    seed=42
+                ),
+                'spark_lr': SparkLogisticRegression(
+                    labelCol="cardio",
+                    featuresCol="scaled_features",
+                    maxIter=100,
+                    regParam=0.1,
+                    elasticNetParam=0.8
+                ),
+                'spark_gbt': SparkGBTClassifier(
+                    labelCol="cardio",
+                    featuresCol="scaled_features",
+                    maxIter=100,
+                    maxDepth=5,
+                    seed=42
+                )
+            }
+        else:
+            models = {
+                f'spark_{args.model}': SparkRandomForestClassifier(
+                    labelCol="cardio",
+                    featuresCol="scaled_features",
+                    numTrees=100,
+                    maxDepth=10,
+                    seed=42
+                )
+            }
         
-        # Evaluate model
-        eval_results = evaluate_spark_model(model, test_df)
+        # Train and evaluate each model
+        best_auc = 0
+        best_model_name = None
+        best_model = None
         
-        # Print results
-        print("\nResults for Spark Random Forest:")
-        print(f"Accuracy: {eval_results['Accuracy']:.4f}")
-        print(f"Precision: {eval_results['Precision']:.4f}")
-        print(f"Recall: {eval_results['Recall']:.4f}")
-        print(f"F1 Score: {eval_results['F1 Score']:.4f}")
-        print(f"AUC: {eval_results['AUC']:.4f}")
+        for model_name, model in models.items():
+            print(f"\n--- Training {model_name} model ---\n")
+            
+            # Create pipeline with feature preprocessing and model
+            pipeline = Pipeline(stages=feature_pipeline.getStages() + [model])
+            
+            # Train model
+            trained_model = pipeline.fit(train_df)
+            
+            # Evaluate model
+            eval_results = evaluate_spark_model(trained_model, test_df)
+            results[model_name] = eval_results
+            
+            # Print results
+            print(f"\nResults for {model_name}:")
+            print(f"Accuracy: {eval_results['Accuracy']:.4f}")
+            print(f"Precision: {eval_results['Precision']:.4f}")
+            print(f"Recall: {eval_results['Recall']:.4f}")
+            print(f"F1 Score: {eval_results['F1 Score']:.4f}")
+            print(f"AUC: {eval_results['AUC']:.4f}")
+            
+            # Plot confusion matrix
+            if 'y_true' in eval_results and 'y_pred' in eval_results:
+                plot_confusion_matrix(
+                    eval_results['y_true'],
+                    eval_results['y_pred'],
+                    output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_confusion_matrix.png')
+                )
+                print(f"Confusion matrix saved to {os.path.join(args.output_dir, 'visualizations', f'{model_name}_confusion_matrix.png')}")
+            
+            # Plot ROC curve
+            if 'y_true' in eval_results and 'y_pred_proba' in eval_results:
+                plot_roc_curve(
+                    eval_results['y_true'],
+                    eval_results['y_pred_proba'],
+                    output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_roc_curve.png')
+                )
+                print(f"ROC curve saved to {os.path.join(args.output_dir, 'visualizations', f'{model_name}_roc_curve.png')}")
+            
+            # Save model
+            if args.save_model:
+                model_path = os.path.join(args.output_dir, 'models', f'{model_name}_model')
+                trained_model.write().overwrite().save(model_path)
+                print(f"Model saved to {model_path}")
+            
+            # Track best model
+            if eval_results['AUC'] > best_auc:
+                best_auc = eval_results['AUC']
+                best_model_name = model_name
+                best_model = trained_model
         
-        # Plot confusion matrix and ROC curve for Spark model
-        if 'y_true' in eval_results and 'y_pred' in eval_results:
-            plot_confusion_matrix(
-                eval_results['y_true'],
-                eval_results['y_pred'],
-                output_path=os.path.join(args.output_dir, 'visualizations', 'spark_rf_confusion_matrix.png')
-            )
-            print(f"Confusion matrix saved to {os.path.join(args.output_dir, 'visualizations', 'spark_rf_confusion_matrix.png')}")
+        # Compare models if multiple were trained
+        if len(models) > 1:
+            print("\n=== Model Comparison ===\n")
+            
+            # Create comparison table
+            comparison = pd.DataFrame({
+                model_name: {
+                    'Accuracy': results[model_name]['Accuracy'],
+                    'Precision': results[model_name]['Precision'],
+                    'Recall': results[model_name]['Recall'],
+                    'F1 Score': results[model_name]['F1 Score'],
+                    'AUC': results[model_name]['AUC']
+                } for model_name in models.keys()
+            }).T
+            
+            print(comparison)
+            
+            # Save comparison
+            comparison.to_csv(os.path.join(args.output_dir, 'results', 'spark_model_comparison.csv'))
+            
+            # Plot comparison
+            plt.figure(figsize=(12, 8))
+            comparison.plot(kind='bar', figsize=(12, 8))
+            plt.title('Spark Model Comparison')
+            plt.ylabel('Score')
+            plt.xlabel('Model')
+            plt.xticks(rotation=0)
+            plt.legend(loc='lower right')
+            plt.tight_layout()
+            plt.savefig(os.path.join(args.output_dir, 'visualizations', 'spark_model_comparison.png'))
+            
+            # Save best model separately
+            if best_model is not None and args.save_model:
+                best_model_path = os.path.join(args.output_dir, 'models', 'best_spark_model')
+                best_model.write().overwrite().save(best_model_path)
+                print(f"\nBest model ({best_model_name}) saved to {best_model_path}")
         
-        if 'y_true' in eval_results and 'y_pred_proba' in eval_results:
-            plot_roc_curve(
-                eval_results['y_true'],
-                eval_results['y_pred_proba'],
-                output_path=os.path.join(args.output_dir, 'visualizations', 'spark_rf_roc_curve.png')
-            )
-            print(f"ROC curve saved to {os.path.join(args.output_dir, 'visualizations', 'spark_rf_roc_curve.png')}")
+        # Save model metrics in JSON format
+        model_metrics = []
+        for model_name in models.keys():
+            model_metrics.append({
+                "model_name": model_name,
+                "accuracy": float(results[model_name]['Accuracy']),
+                "precision": float(results[model_name]['Precision']),
+                "recall": float(results[model_name]['Recall']),
+                "f1": float(results[model_name]['F1 Score']),
+                "auc": float(results[model_name]['AUC']),
+                "best_model": model_name == best_model_name
+            })
         
-        # Save model
-        if args.save_model:
-            model.write().overwrite().save(os.path.join(args.output_dir, 'models', 'spark_rf_model'))
+        # Save model metrics to JSON file
+        import json
+        with open(os.path.join(args.output_dir, 'results', 'spark_model_metrics.json'), 'w') as f:
+            json.dump(model_metrics, f, indent=2)
         
-        return eval_results
+        print(f"Model metrics saved to {os.path.join(args.output_dir, 'results', 'spark_model_metrics.json')}")
+        
+        return results
     
     finally:
         # Stop Spark session
@@ -377,7 +483,6 @@ def main():
     if args.output_dir.startswith('/kaggle/'):
         try:
             import zipfile
-            from IPython.display import FileLink
             
             # Create zip file of output directory
             zip_path = '/kaggle/working/output_results.zip'
@@ -389,8 +494,15 @@ def main():
                         zipf.write(file_path, arcname)
             
             print(f"\nOutput directory zipped to {zip_path}")
-            print("You can download it using the FileLink below:")
-            display(FileLink(zip_path))
+            print("You can download it using the FileLink below in a Jupyter notebook")
+            
+            # Create a simple text file with instructions for downloading
+            with open('/kaggle/working/download_instructions.txt', 'w') as f:
+                f.write(f"The output results are available in the zip file: {zip_path}\n")
+                f.write("You can download this file from the Kaggle notebook output files section.")
+            
+            print("Download instructions saved to /kaggle/working/download_instructions.txt")
+            
         except Exception as e:
             print(f"Error creating zip file: {e}")
 
