@@ -68,7 +68,11 @@ def create_medical_features(df):
     # Create combined risk factors count
     risk_factors = ['cholesterol', 'gluc', 'smoke', 'alco']
     if all(factor in df_features.columns for factor in risk_factors):
-        # For cholesterol and glucose, values > 1 indicate elevated levels
+        # Convert cholesterol and glucose to numeric if they are categorical
+        if pd.api.types.is_categorical_dtype(df_features['cholesterol']):
+            df_features['cholesterol'] = df_features['cholesterol'].astype(int)
+        if pd.api.types.is_categorical_dtype(df_features['gluc']):
+            df_features['gluc'] = df_features['gluc'].astype(int)
         df_features['cholesterol_elevated'] = (df_features['cholesterol'] > 1).astype(int)
         df_features['glucose_elevated'] = (df_features['gluc'] > 1).astype(int)
         
