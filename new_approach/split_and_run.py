@@ -19,7 +19,7 @@ print(f"Test shape: {test_df.shape}")
 from main import run_sklearn_xgb_workflow
 import joblib
 
-model, results = run_sklearn_xgb_workflow(train_df, val_df, test_df)
+model, results = run_sklearn_xgb_workflow(train_df, val_df, test_df,'/kaggle/working/')
 
 # Save the trained model as a .pkl file
 joblib.dump(model, '/kaggle/working/xgb_model.pkl')

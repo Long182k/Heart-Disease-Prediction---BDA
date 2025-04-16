@@ -1,417 +1,204 @@
 #!/usr/bin/env python3
 """
-Main Script for Cardiovascular Disease Prediction
+Main Script for Cardiovascular Disease Prediction (XGBoost API-ready)
 
-This script orchestrates the entire workflow for cardiovascular disease prediction:
-1. Data loading and preprocessing
-2. Feature engineering
-3. Model training and evaluation
-4. Results visualization and reporting
+This script:
+1. Loads and preprocesses data
+2. Performs feature engineering
+3. Trains and evaluates an XGBoost model
+4. Exports the trained model as a .pkl file for Flask API use
 """
 
 import os
 import argparse
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
-from pyspark.sql import SparkSession
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.svm import SVC
-from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
-
-# Import custom modules
-from utils.data_preprocessing import (
-    load_data, clean_data, explore_data, split_data,
-    load_spark_data, clean_spark_data, split_spark_data
-)
-from feature_engineering import (
-    create_medical_features, encode_categorical_features,
-    select_features, create_feature_pipeline
-)
-from model_training import (
-    train_sklearn_model, train_spark_model,
-    save_model, load_model
-)
-from evaluation import (
-    evaluate_sklearn_model, evaluate_spark_model,
-    plot_confusion_matrix, plot_roc_curve
-)
 import pickle
 import xgboost as xgb
+import json
+import time
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from utils.data_preprocessing import load_data, clean_data, explore_data
+from feature_engineering import create_medical_features, encode_categorical_features, select_features
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score, roc_auc_score,
+    confusion_matrix, classification_report, roc_curve
+)
 
 def parse_arguments():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Cardiovascular Disease Prediction')
-    
-    parser.add_argument('--data_path', type=str, 
-                        default='/kaggle/input/cardiovascular-disease/cardio_data_processed.csv',
-                        help='Path to the dataset')
-
-    parser.add_argument('--output_dir', type=str, 
-                        default='output',
-                        help='Directory to save outputs')
-    
-    parser.add_argument('--use_spark', action='store_true',
-                        help='Use Spark for processing')
-    
-    parser.add_argument('--explore', action='store_true',
-                        help='Perform exploratory data analysis')
-    
-    parser.add_argument('--model', type=str, 
-                        choices=['rf', 'gb', 'lr', 'svm', 'all'],
-                        default='rf',
-                        help='Model to train (rf: Random Forest, gb: Gradient Boosting, '
-                             'lr: Logistic Regression, svm: Support Vector Machine, all: All models)')
-    
-    parser.add_argument('--feature_selection', type=str,
-                        choices=['f_classif', 'mutual_info', 'rfe', 'none'],
-                        default='none',
-                        help='Feature selection method')
-    
-    parser.add_argument('--n_features', type=int, 
-                        default=10,
-                        help='Number of features to select')
-    
-    parser.add_argument('--save_model', action='store_true',
-                        help='Save the trained model')
-    
+    parser = argparse.ArgumentParser(description='Cardiovascular Disease Prediction (XGBoost API-ready)')
+    parser.add_argument('--data_path', type=str, required=True, help='Path to the dataset')
+    parser.add_argument('--output_dir', type=str, default='output', help='Directory to save outputs')
+    parser.add_argument('--explore', action='store_true', help='Perform exploratory data analysis')
+    parser.add_argument('--feature_selection', type=str, choices=['f_classif', 'mutual_info', 'rfe', 'none'], default='none', help='Feature selection method')
+    parser.add_argument('--n_features', type=int, default=10, help='Number of features to select')
+    parser.add_argument('--save_model', action='store_true', help='Save the trained model')
     return parser.parse_args()
 
 def setup_directories(output_dir):
-    """Create necessary directories for outputs."""
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'models'), exist_ok=True)
-    os.makedirs(os.path.join(output_dir, 'visualizations'), exist_ok=True)
     os.makedirs(os.path.join(output_dir, 'results'), exist_ok=True)
 
-def get_model(model_name):
-    """Get the model based on the model name."""
-    if model_name == 'rf':
-        return RandomForestClassifier(
-            n_estimators=100, 
-            max_depth=10,
-            min_samples_split=5,
-            min_samples_leaf=2,
-            random_state=42
-        )
-    elif model_name == 'gb':
-        return GradientBoostingClassifier(
-            n_estimators=100,
-            learning_rate=0.1,
-            max_depth=5,
-            random_state=42
-        )
-    elif model_name == 'lr':
-        return LogisticRegression(
-            C=1.0,
-            penalty='l2',
-            solver='liblinear',
-            random_state=42
-        )
-    elif model_name == 'svm':
-        return SVC(
-            C=1.0,
-            kernel='rbf',
-            probability=True,
-            random_state=42
-        )
+def run_classification_models_workflow(
+    df, output_dir, feature_selection='none', n_features=10, explore=False, save_model=True
+):
+    df_clean = clean_data(df)
+    if explore:
+        explore_data(df_clean)
+    df_features = create_medical_features(df_clean)
+    df_encoded = encode_categorical_features(df_features)
+    if feature_selection != 'none':
+        _, df_selected = select_features(df_encoded, method=feature_selection, k=n_features)
     else:
-        raise ValueError(f"Unsupported model: {model_name}")
+        df_selected = df_encoded
 
-def run_sklearn_xgb_workflow(train_df, val_df, test_df, output_dir):
-    """Train and evaluate XGBoost model, save as .pkl, print confusion matrix and report."""
-    print("\n=== Training XGBoost Model (for API deployment) ===\n")
-    # Prepare features and target
-    X_train = train_df.drop('cardio', axis=1)
+    from sklearn.model_selection import train_test_split
+    train_df, temp_df = train_test_split(df_selected, test_size=0.2, random_state=42, stratify=df_selected['cardio'])
+    val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['cardio'])
+
+    X_train = train_df.drop(['cardio', 'id'], axis=1, errors='ignore')
     y_train = train_df['cardio']
-    X_val = val_df.drop('cardio', axis=1)
+    X_val = val_df.drop(['cardio', 'id'], axis=1, errors='ignore')
     y_val = val_df['cardio']
-    X_test = test_df.drop('cardio', axis=1)
+    X_test = test_df.drop(['cardio', 'id'], axis=1, errors='ignore')
     y_test = test_df['cardio']
 
-    # Remove ID column if present
-    if 'id' in X_train.columns:
-        X_train = X_train.drop('id', axis=1)
-        X_val = X_val.drop('id', axis=1)
-        X_test = X_test.drop('id', axis=1)
+    models = [
+        {
+            "model_name": "logistic_regression",
+            "estimator": LogisticRegression(
+                C=1.0, penalty='l2', solver='liblinear', random_state=42, max_iter=1000
+            ),
+            "params": {"C": 1.0, "penalty": "l2", "solver": "liblinear"}
+        },
+        {
+            "model_name": "random_forest",
+            "estimator": RandomForestClassifier(
+                n_estimators=100, max_depth=10, min_samples_split=2, random_state=42
+            ),
+            "params": {"n_estimators": 100, "max_depth": 10, "min_samples_split": 2}
+        },
+        {
+            "model_name": "gradient_boosting",
+            "estimator": GradientBoostingClassifier(
+                n_estimators=100, learning_rate=0.1, max_depth=5, random_state=42
+            ),
+            "params": {"n_estimators": 100, "learning_rate": 0.1, "max_depth": 5}
+        }
+    ]
 
-    # Train XGBoost
-    model = xgb.XGBClassifier(
-        n_estimators=100,
-        max_depth=5,
-        learning_rate=0.1,
-        objective="binary:logistic",
-        random_state=42,
-        use_label_encoder=False,
-        eval_metric="logloss"
-    )
-    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+    metrics_list = []
+    best_model = None
+    best_f1 = -1
+    best_model_name = ""
+    best_model_obj = None
 
-    # Save model as .pkl
-    model_path = os.path.join(output_dir, "models", "xgboost_model.pkl")
-    with open(model_path, "wb") as f:
-        pickle.dump(model, f)
-    print(f"XGBoost model saved as .pkl to {model_path}")
+    for model_info in models:
+        print(f"\n--- Training {model_info['model_name']} ---")
+        start_time = time.time()
+        model = model_info["estimator"]
+        model.fit(X_train, y_train)
+        training_time = time.time() - start_time
 
-    # Evaluate
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
-    cm = confusion_matrix(y_test, y_pred)
-    report = classification_report(y_test, y_pred)
+        y_pred = model.predict(X_test)
+        y_pred_proba = model.predict_proba(X_test)[:, 1] if hasattr(model, "predict_proba") else None
 
-    # Print confusion matrix and classification report
-    print("\nConfusion Matrix (XGBoost):")
-    print(cm)
-    print("\nClassification Report (XGBoost):")
-    print(report)
+        accuracy = accuracy_score(y_test, y_pred)
+        precision = precision_score(y_test, y_pred)
+        recall = recall_score(y_test, y_pred)
+        f1 = f1_score(y_test, y_pred)
+        auc = roc_auc_score(y_test, y_pred_proba) if y_pred_proba is not None else None
 
-    # Optionally, print ROC AUC
-    from sklearn.metrics import roc_auc_score
-    auc = roc_auc_score(y_test, y_pred_proba)
-    print(f"ROC AUC (XGBoost): {auc:.4f}")
+        # === Confusion Matrix Visualization and Saving ===
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(figsize=(6, 4))
+        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+        plt.title(f'Confusion Matrix: {model_info["model_name"]}')
+        plt.xlabel('Predicted')
+        plt.ylabel('Actual')
+        cm_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_confusion_matrix.png')
+        plt.savefig(cm_path)
+        plt.close()
+        print(f"Confusion matrix saved to {cm_path}")
 
-    return model
-
-def run_spark_workflow(args):
-    """Run the Spark workflow."""
-    print("\n=== Running Spark workflow ===\n")
-    
-    # Create Spark session
-    spark = SparkSession.builder \
-        .appName("CardiovascularDiseasePrediction") \
-        .config("spark.executor.memory", "4g") \
-        .config("spark.driver.memory", "4g") \
-        .getOrCreate()
-    
-    try:
-        # Load and preprocess data
-        spark_df = load_spark_data(spark, args.data_path)
-        spark_df_clean = clean_spark_data(spark_df)
-        
-        # Drop columns ending with '_encoded'
-        columns_to_drop = [col for col in spark_df_clean.columns if col.endswith('_encoded')]
-        if columns_to_drop:
-            spark_df_clean = spark_df_clean.drop(*columns_to_drop)
-            print(f"Dropped {len(columns_to_drop)} encoded columns: {columns_to_drop}")
-        
-        # Split data
-        train_df, val_df, test_df = split_spark_data(spark_df_clean)
-        
-        # Define feature columns
-        categorical_cols = ['gender', 'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bp_category']
-        numeric_cols = ['age_years', 'height', 'weight', 'ap_hi', 'ap_lo', 'bmi']
-        
-        # Create feature pipeline
-        from feature_engineering import create_spark_feature_pipeline
-        feature_pipeline = create_spark_feature_pipeline(categorical_cols, numeric_cols)
-        
-        # Define models to train
-        from pyspark.ml.classification import RandomForestClassifier as SparkRandomForestClassifier
-        from pyspark.ml.classification import LogisticRegression as SparkLogisticRegression
-        from pyspark.ml.classification import GBTClassifier as SparkGBTClassifier
-        from pyspark.ml import Pipeline
-        
-        models = {}
-        results = {}
-        
-        if args.model == 'all':
-            models = {
-                'spark_rf': SparkRandomForestClassifier(
-                    labelCol="cardio",
-                    featuresCol="scaled_features",
-                    numTrees=100,
-                    maxDepth=10,
-                    seed=42
-                ),
-                'spark_lr': SparkLogisticRegression(
-                    labelCol="cardio",
-                    featuresCol="scaled_features",
-                    maxIter=100,
-                    regParam=0.1,
-                    elasticNetParam=0.8
-                ),
-                'spark_gbt': SparkGBTClassifier(
-                    labelCol="cardio",
-                    featuresCol="scaled_features",
-                    maxIter=100,
-                    maxDepth=5,
-                    seed=42
-                )
-            }
-        else:
-            models = {
-                f'spark_{args.model}': SparkRandomForestClassifier(
-                    labelCol="cardio",
-                    featuresCol="scaled_features",
-                    numTrees=100,
-                    maxDepth=10,
-                    seed=42
-                )
-            }
-        
-        # Train and evaluate each model
-        best_auc = 0
-        best_model_name = None
-        best_model = None
-        
-        for model_name, model in models.items():
-            print(f"\n--- Training {model_name} model ---\n")
-            
-            # Create pipeline with feature preprocessing and model
-            pipeline = Pipeline(stages=feature_pipeline.getStages() + [model])
-            
-            # Train model
-            trained_model = pipeline.fit(train_df)
-            
-            # Evaluate model
-            eval_results = evaluate_spark_model(trained_model, test_df)
-            results[model_name] = eval_results
-            
-            # Print results
-            print(f"\nResults for {model_name}:")
-            print(f"Accuracy: {eval_results['Accuracy']:.4f}")
-            print(f"Precision: {eval_results['Precision']:.4f}")
-            print(f"Recall: {eval_results['Recall']:.4f}")
-            print(f"F1 Score: {eval_results['F1 Score']:.4f}")
-            print(f"AUC: {eval_results['AUC']:.4f}")
-            
-            # Plot confusion matrix
-            if 'y_true' in eval_results and 'y_pred' in eval_results:
-                plot_confusion_matrix(
-                    eval_results['y_true'],
-                    eval_results['y_pred'],
-                    output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_confusion_matrix.png')
-                )
-                print(f"Confusion matrix saved to {os.path.join(args.output_dir, 'visualizations', f'{model_name}_confusion_matrix.png')}")
-            
-            # Plot ROC curve
-            if 'y_true' in eval_results and 'y_pred_proba' in eval_results:
-                plot_roc_curve(
-                    eval_results['y_true'],
-                    eval_results['y_pred_proba'],
-                    output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_roc_curve.png')
-                )
-                print(f"ROC curve saved to {os.path.join(args.output_dir, 'visualizations', f'{model_name}_roc_curve.png')}")
-            
-            # Save model
-            if args.save_model:
-                model_path = os.path.join(args.output_dir, 'models', f'{model_name}_model')
-                trained_model.write().overwrite().save(model_path)
-                print(f"Model saved to {model_path}")
-            
-            # Track best model
-            if eval_results['AUC'] > best_auc:
-                best_auc = eval_results['AUC']
-                best_model_name = model_name
-                best_model = trained_model
-        
-        # Compare models if multiple were trained
-        if len(models) > 1:
-            print("\n=== Model Comparison ===\n")
-            
-            # Create comparison table
-            comparison = pd.DataFrame({
-                model_name: {
-                    'Accuracy': results[model_name]['Accuracy'],
-                    'Precision': results[model_name]['Precision'],
-                    'Recall': results[model_name]['Recall'],
-                    'F1 Score': results[model_name]['F1 Score'],
-                    'AUC': results[model_name]['AUC']
-                } for model_name in models.keys()
-            }).T
-            
-            print(comparison)
-            
-            # Save comparison
-            comparison.to_csv(os.path.join(args.output_dir, 'results', 'spark_model_comparison.csv'))
-            
-            # Plot comparison
-            plt.figure(figsize=(12, 8))
-            comparison.plot(kind='bar', figsize=(12, 8))
-            plt.title('Spark Model Comparison')
-            plt.ylabel('Score')
-            plt.xlabel('Model')
-            plt.xticks(rotation=0)
+        # === ROC Curve Visualization and Saving ===
+        if y_pred_proba is not None:
+            fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+            plt.figure(figsize=(6, 4))
+            plt.plot(fpr, tpr, label=f'AUC = {auc:.2f}')
+            plt.plot([0, 1], [0, 1], 'k--')
+            plt.xlabel('False Positive Rate')
+            plt.ylabel('True Positive Rate')
+            plt.title(f'ROC Curve: {model_info["model_name"]}')
             plt.legend(loc='lower right')
-            plt.tight_layout()
-            plt.savefig(os.path.join(args.output_dir, 'visualizations', 'spark_model_comparison.png'))
-            
-            # Save best model separately
-            if best_model is not None and args.save_model:
-                best_model_path = os.path.join(args.output_dir, 'models', 'best_spark_model')
-                best_model.write().overwrite().save(best_model_path)
-                print(f"\nBest model ({best_model_name}) saved to {best_model_path}")
-        
-        # Save model metrics in JSON format
-        model_metrics = []
-        for model_name in models.keys():
-            model_metrics.append({
-                "model_name": model_name,
-                "accuracy": float(results[model_name]['Accuracy']),
-                "precision": float(results[model_name]['Precision']),
-                "recall": float(results[model_name]['Recall']),
-                "f1": float(results[model_name]['F1 Score']),
-                "auc": float(results[model_name]['AUC']),
-                "best_model": model_name == best_model_name
-            })
-        
-        # Save model metrics to JSON file
-        import json
-        with open(os.path.join(args.output_dir, 'results', 'spark_model_metrics.json'), 'w') as f:
-            json.dump(model_metrics, f, indent=2)
-        
-        print(f"Model metrics saved to {os.path.join(args.output_dir, 'results', 'spark_model_metrics.json')}")
-        
-        return results
-    
-    finally:
-        # Stop Spark session
-        spark.stop()
+            roc_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_roc_curve.png')
+            plt.savefig(roc_path)
+            plt.close()
+            print(f"ROC curve saved to {roc_path}")
+
+        # === Classification Report Printing and Saving ===
+        report = classification_report(y_test, y_pred)
+        print("\nClassification Report:")
+        print(report)
+        report_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_classification_report.txt')
+        with open(report_path, "w") as f:
+            f.write(report)
+        print(f"Classification report saved to {report_path}")
+
+        metrics = {
+            "model_name": model_info["model_name"],
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1": f1,
+            "auc": auc,
+            "training_time": training_time,
+            "best_params": model_info["params"]
+        }
+        metrics_list.append(metrics)
+
+        print(f"Accuracy: {accuracy:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f} | AUC: {auc:.4f}")
+
+        if f1 > best_f1:
+            best_f1 = f1
+            best_model = model
+            best_model_name = model_info["model_name"]
+            best_model_obj = model
+
+    # Save metrics to JSON
+    metrics_path = os.path.join(output_dir, "results", "model_metrics.json")
+    with open(metrics_path, "w") as f:
+        json.dump(metrics_list, f, indent=2)
+    print(f"\nModel metrics saved to {metrics_path}")
+
+    # Save best model as .pkl
+    if save_model:
+        model_path = os.path.join(output_dir, "models", f"{best_model_name}_model.pkl")
+        import pickle
+        with open(model_path, "wb") as f:
+            pickle.dump(best_model_obj, f)
+        print(f"Best model ({best_model_name}) saved as .pkl to {model_path}")
+
+    return best_model_obj
 
 def main():
-    """Main function."""
-    # Parse arguments
     args = parse_arguments()
-    
-    # Setup directories
     setup_directories(args.output_dir)
-    
-    # Run workflow
-    if args.use_spark:
-        results = run_spark_workflow(args)
-    else:
-        results = run_sklearn_workflow(args)
-    
+    df = load_data(args.data_path)
+    run_classification_models_workflow(
+        df,
+        output_dir=args.output_dir,
+        feature_selection=args.feature_selection,
+        n_features=args.n_features,
+        explore=args.explore,
+        save_model=args.save_model
+    )
     print("\n=== Workflow completed successfully ===\n")
-    
-    # Add code to zip and download output in Kaggle
-    if args.output_dir.startswith('/kaggle/'):
-        try:
-            import zipfile
-            
-            # Create zip file of output directory
-            zip_path = '/kaggle/working/output_results.zip'
-            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(args.output_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, os.path.dirname(args.output_dir))
-                        zipf.write(file_path, arcname)
-            
-            print(f"\nOutput directory zipped to {zip_path}")
-            print("You can download it using the FileLink below in a Jupyter notebook")
-            
-            # Create a simple text file with instructions for downloading
-            with open('/kaggle/working/download_instructions.txt', 'w') as f:
-                f.write(f"The output results are available in the zip file: {zip_path}\n")
-                f.write("You can download this file from the Kaggle notebook output files section.")
-            
-            print("Download instructions saved to /kaggle/working/download_instructions.txt")
-            
-        except Exception as e:
-            print(f"Error creating zip file: {e}")
 
 if __name__ == "__main__":
     main()
