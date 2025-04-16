@@ -58,6 +58,10 @@ def clean_data(df):
     df_clean = df_clean.drop_duplicates()
     print(f"Removed {initial_rows - df_clean.shape[0]} duplicate rows")
     
+    # Always define numeric and categorical columns here
+    numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
+    categorical_cols = df_clean.select_dtypes(include=['object', 'category']).columns
+
     # Check for missing values
     missing_values = df_clean.isnull().sum()
     if missing_values.sum() > 0:
@@ -66,13 +70,11 @@ def clean_data(df):
         
         # Fill missing values or drop rows with missing values
         # For numerical columns, fill with median
-        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
         for col in numeric_cols:
             if df_clean[col].isnull().sum() > 0:
                 df_clean[col] = df_clean[col].fillna(df_clean[col].median())
         
         # For categorical columns, fill with mode
-        categorical_cols = df_clean.select_dtypes(include=['object', 'category']).columns
         for col in categorical_cols:
             if df_clean[col].isnull().sum() > 0:
                 df_clean[col] = df_clean[col].fillna(df_clean[col].mode()[0])
