@@ -62,6 +62,7 @@ def run_classification_models_workflow(
     val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['cardio'])
 
     X_train = train_df.drop(['cardio', 'id'], axis=1, errors='ignore')
+    print("X_train.columns.tolist()",X_train.columns.tolist())
     y_train = train_df['cardio']
     X_val = val_df.drop(['cardio', 'id'], axis=1, errors='ignore')
     y_val = val_df['cardio']
