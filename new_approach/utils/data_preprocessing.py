@@ -66,7 +66,7 @@ def clean_data(df):
         
         # Fill missing values or drop rows with missing values
         # For numerical columns, fill with median
-        numeric_cols = df_clean.select_dtypes(include=['int64', 'float64']).columns
+        numeric_cols = df_clean.select_dtypes(include=[np.number]).columns.tolist()
         for col in numeric_cols:
             if df_clean[col].isnull().sum() > 0:
                 df_clean[col] = df_clean[col].fillna(df_clean[col].median())

@@ -126,9 +126,14 @@ def run_classification_models_workflow(
         plt.close()
         print(f"Confusion matrix saved to {cm_path}")
 
+        # Save confusion matrix as CSV
+        cm_csv_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_confusion_matrix.csv')
+        pd.DataFrame(cm).to_csv(cm_csv_path, index=False)
+        print(f"Confusion matrix CSV saved to {cm_csv_path}")
+
         # === ROC Curve Visualization and Saving ===
         if y_pred_proba is not None:
-            fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
+            fpr, tpr, thresholds = roc_curve(y_test, y_pred_proba)
             plt.figure(figsize=(6, 4))
             plt.plot(fpr, tpr, label=f'AUC = {auc:.2f}')
             plt.plot([0, 1], [0, 1], 'k--')
@@ -141,14 +146,26 @@ def run_classification_models_workflow(
             plt.close()
             print(f"ROC curve saved to {roc_path}")
 
+            # Save ROC curve data as CSV
+            roc_csv_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_roc_curve.csv')
+            pd.DataFrame({'fpr': fpr, 'tpr': tpr, 'thresholds': thresholds}).to_csv(roc_csv_path, index=False)
+            print(f"ROC curve data saved to {roc_csv_path}")
+
         # === Classification Report Printing and Saving ===
-        report = classification_report(y_test, y_pred)
+        report = classification_report(y_test, y_pred, output_dict=True)
+        report_txt = classification_report(y_test, y_pred)
         print("\nClassification Report:")
-        print(report)
+        print(report_txt)
         report_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_classification_report.txt')
         with open(report_path, "w") as f:
-            f.write(report)
+            f.write(report_txt)
         print(f"Classification report saved to {report_path}")
+
+        # Save classification report as JSON
+        report_json_path = os.path.join(output_dir, "results", f'{model_info["model_name"]}_classification_report.json')
+        with open(report_json_path, "w") as f:
+            json.dump(report, f, indent=2)
+        print(f"Classification report JSON saved to {report_json_path}")
 
         metrics = {
             "model_name": model_info["model_name"],
@@ -179,7 +196,6 @@ def run_classification_models_workflow(
     # Save best model as .pkl
     if save_model:
         model_path = os.path.join(output_dir, "models", f"{best_model_name}_model.pkl")
-        import pickle
         with open(model_path, "wb") as f:
             pickle.dump(best_model_obj, f)
         print(f"Best model ({best_model_name}) saved as .pkl to {model_path}")
