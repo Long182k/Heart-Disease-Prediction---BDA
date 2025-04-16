@@ -42,10 +42,6 @@ expected_features = [
     # Engineered features will be calculated in the backend
 ]
 
-@app.route('/')
-def index():
-    return app.send_static_file('index.html')
-
 @app.route('/api/predict', methods=['POST'])
 def predict():
     try:

@@ -1,32 +1,19 @@
-#!/usr/bin/env python3
-"""
-Model Deployment Module for Cardiovascular Disease Prediction
-
-This module provides functions for deploying the trained models as a REST API
-using Flask, and for making predictions on new data.
-"""
-
 import os
 import sys
 import pickle
-import numpy as np
 import pandas as pd
 from flask import Flask, request, jsonify
 from pyspark.sql import SparkSession
-from pyspark.ml import PipelineModel
-from pyspark.ml.feature import VectorAssembler, StandardScaler
-import xgboost as xgb
 
 # Import custom modules
 sys.path.append("/Users/drake/Documents/UWE/BDA/Heart-Disease-Prediction---BDA")
 from feature_engineering import (
-    create_medical_features, encode_categorical_features, 
-    create_interaction_features, select_features
+    create_medical_features, encode_categorical_features
 )
 
 # Define constants
-MODEL_PATH = "/Users/drake/Documents/UWE/BDA/Heart-Disease-Prediction---BDA/output/models/xgboost_model.pkl"
-SCALER_PATH = "/Users/drake/Documents/UWE/BDA/Heart-Disease-Prediction---BDA/output/models/scaler_model"
+MODEL_PATH = "/Users/drake/Downloads/output/models/gradient_boosting_model.pkl"
+METRICS_PATH = "/Users/drake/Downloads/output/results/model_metrics.json"
 
 # Create Flask app
 app = Flask(__name__)
@@ -35,59 +22,61 @@ app = Flask(__name__)
 with open(MODEL_PATH, "rb") as f:
     model = pickle.load(f)
 
-# Create Spark session for preprocessing
-spark = SparkSession.builder \
-    .appName("CardioDiseasePredictionAPI") \
-    .config("spark.driver.memory", "2g") \
-    .getOrCreate()
 
-# Load scaler model
-scaler_model = PipelineModel.load(SCALER_PATH)
+@app.route("/features", methods=["GET"])
+def get_features():
+    """
+    Endpoint to get information about expected input features.
+    """
+    feature_info = {
+        'features': [
+            {'name': 'age', 'type': 'number', 'min': 20, 'max': 100, 'required': True},
+            {'name': 'gender', 'type': 'select', 'options': [1, 2], 'required': True},
+            {'name': 'height', 'type': 'number', 'min': 100, 'max': 250, 'required': True},
+            {'name': 'weight', 'type': 'number', 'min': 20, 'max': 200, 'required': True},
+            {'name': 'ap_hi', 'type': 'number', 'min': 80, 'max': 250, 'required': True},
+            {'name': 'ap_lo', 'type': 'number', 'min': 40, 'max': 150, 'required': True},
+            {'name': 'cholesterol', 'type': 'select', 'options': [1, 2, 3], 'required': True},
+            {'name': 'gluc', 'type': 'select', 'options': [1, 2, 3], 'required': True},
+            {'name': 'smoke', 'type': 'select', 'options': [0, 1], 'required': True},
+            {'name': 'alco', 'type': 'select', 'options': [0, 1], 'required': True},
+            {'name': 'active', 'type': 'select', 'options': [0, 1], 'required': True}
+        ]
+    }
+    return jsonify(feature_info)
+
+@app.route("/metrics", methods=["GET"])
+def get_metrics():
+    """
+    Endpoint to get model metrics.
+    """
+    try:
+        if os.path.exists(METRICS_PATH):
+            with open(METRICS_PATH, 'r') as f:
+                metrics = json.load(f)
+            return jsonify(metrics)
+        else:
+            return jsonify({'error': 'Metrics not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route("/predict", methods=["POST"])
 def predict():
     """
     Endpoint for making predictions on new data.
-    
-    Expected JSON format:
-    {
-        "age": 60,
-        "gender": 1,  # 1 for female, 2 for male
-        "height": 165,
-        "weight": 70,
-        "ap_hi": 120,  # systolic blood pressure
-        "ap_lo": 80,   # diastolic blood pressure
-        "cholesterol": 1,  # 1: normal, 2: above normal, 3: well above normal
-        "gluc": 1,     # 1: normal, 2: above normal, 3: well above normal
-        "smoke": 0,    # 0: non-smoker, 1: smoker
-        "alco": 0,     # 0: doesn't drink, 1: drinks
-        "active": 1    # 0: inactive, 1: active
-    }
     """
     try:
-        # Get data from request
         data = request.get_json()
-        
-        # Convert to DataFrame
         input_df = pd.DataFrame([data])
-        
-        # Preprocess data
         processed_data = preprocess_input(input_df)
-        
-        # Make prediction
         prediction = model.predict(processed_data)[0]
         probability = model.predict_proba(processed_data)[0, 1]
-        
-        # Prepare response
         result = {
             "prediction": int(prediction),
             "probability": float(probability),
-            "risk_level": get_risk_level(probability),
-            "recommendation": get_recommendation(data, prediction, probability)
+            "risk_level": get_risk_level(probability)
         }
-        
         return jsonify(result)
-    
     except Exception as e:
         return jsonify({"error": str(e)}), 400
 
@@ -125,9 +114,6 @@ def preprocess_input(input_df):
     
     # Encode categorical features
     df = encode_categorical_features(df)
-    
-    # Create interaction features
-    df = create_interaction_features(df)
     
     # Select relevant features (same as used during training)
     selected_features = [
@@ -298,28 +284,15 @@ def home():
         }
     })
 
-def start_server(host="0.0.0.0", port=5000, debug=False):
-    """
-    Start the Flask server.
-    
-    Parameters:
-    -----------
-    host : str
-        Host to run the server on
-    port : int
-        Port to run the server on
-    debug : bool
-        Whether to run in debug mode
-    """
+def start_server(host="0.0.0.0", port=5001, debug=False):
     app.run(host=host, port=port, debug=debug)
 
 if __name__ == "__main__":
-    # Parse command line arguments
     import argparse
     
     parser = argparse.ArgumentParser(description="Start the Cardiovascular Disease Prediction API")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the server on")
-    parser.add_argument("--port", type=int, default=5000, help="Port to run the server on")
+    parser.add_argument("--port", type=int, default=5001, help="Port to run the server on")
     parser.add_argument("--debug", action="store_true", help="Run in debug mode")
     
     args = parser.parse_args()

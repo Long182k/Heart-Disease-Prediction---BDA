@@ -73,6 +73,11 @@ def create_medical_features(df):
             df_features['cholesterol'] = df_features['cholesterol'].astype(int)
         if pd.api.types.is_categorical_dtype(df_features['gluc']):
             df_features['gluc'] = df_features['gluc'].astype(int)
+        # Convert smoke and alco to int if they are categorical
+        if pd.api.types.is_categorical_dtype(df_features['smoke']):
+            df_features['smoke'] = df_features['smoke'].astype(int)
+        if pd.api.types.is_categorical_dtype(df_features['alco']):
+            df_features['alco'] = df_features['alco'].astype(int)
         df_features['cholesterol_elevated'] = (df_features['cholesterol'] > 1).astype(int)
         df_features['glucose_elevated'] = (df_features['gluc'] > 1).astype(int)
         
