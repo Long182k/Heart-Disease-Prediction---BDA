@@ -12,7 +12,7 @@ from feature_engineering import (
 )
 
 # Define constants
-MODEL_PATH = "/Users/drake/Downloads/output/models/gradient_boosting_model.pkl"
+MODEL_PATH = "/Users/drake/Documents/UWE/BDA/Heart-Disease-Prediction---BDA/gradient_boosting_model_test_13.pkl"
 METRICS_PATH = "/Users/drake/Downloads/output/results/model_metrics.json"
 
 # Create Flask app
@@ -40,7 +40,11 @@ def get_features():
             {'name': 'gluc', 'type': 'select', 'options': [1, 2, 3], 'required': True},
             {'name': 'smoke', 'type': 'select', 'options': [0, 1], 'required': True},
             {'name': 'alco', 'type': 'select', 'options': [0, 1], 'required': True},
-            {'name': 'active', 'type': 'select', 'options': [0, 1], 'required': True}
+            {'name': 'active', 'type': 'select', 'options': [0, 1], 'required': True},
+            {'name': 'bmi', 'type': 'number', 'min': 10, 'max': 60, 'required': True},
+            {'name': 'bp_category', 'type': 'select', 'options': [
+                "Normal", "Elevated", "Hypertension Stage 1", "Hypertension Stage 2"
+            ], 'required': True}
         ]
     }
     return jsonify(feature_info)
@@ -63,22 +67,55 @@ def get_metrics():
 @app.route("/predict", methods=["POST"])
 def predict():
     """
-    Endpoint for making predictions on new data.
+    Endpoint for making predictions.
     """
-    try:
-        data = request.get_json()
-        input_df = pd.DataFrame([data])
-        processed_data = preprocess_input(input_df)
-        prediction = model.predict(processed_data)[0]
-        probability = model.predict_proba(processed_data)[0, 1]
-        result = {
-            "prediction": int(prediction),
-            "probability": float(probability),
-            "risk_level": get_risk_level(probability)
-        }
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    data = request.get_json()
+    required_features = [
+        'age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo',
+        'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bmi', 'bp_category'
+    ]
+    
+    # Check for missing features
+    missing = [f for f in required_features if f not in data]
+    if missing:
+        # Try to calculate missing features if possible
+        if 'bmi' in missing and 'height' in data and 'weight' in data:
+            data['bmi'] = data['weight'] / ((data['height'] / 100) ** 2)
+            missing.remove('bmi')
+        
+        if 'bp_category' in missing and 'ap_hi' in data and 'ap_lo' in data:
+            data['bp_category'] = categorize_blood_pressure(data['ap_hi'], data['ap_lo'])
+            missing.remove('bp_category')
+        
+        # If still missing required features, return error
+        if missing:
+            return jsonify({"error": f"Missing features: {missing}"}), 400
+
+    input_df = pd.DataFrame([data])
+    # Preprocess input to match training features
+    processed_input = preprocess_input(input_df)
+
+        # After loading your model
+    print(f"Number of features expected by the model: {model.n_features_in_}")
+    # For models that store feature names
+    if hasattr(model, 'feature_names_in_'):
+        print(f"Feature names: {model.feature_names_in_}")
+        print(f"Number of features: {len(model.feature_names_in_)}")
+
+    # Predict
+    pred = model.predict(processed_input)[0]
+    prob = model.predict_proba(processed_input)[0][1] if hasattr(model, "predict_proba") else None
+    
+    # Get risk level and recommendations
+    risk_level = get_risk_level(prob) if prob is not None else None
+    recommendations = get_recommendation(data, pred, prob) if prob is not None else []
+
+    return jsonify({
+        "prediction": int(pred),
+        "probability": float(prob) if prob is not None else None,
+        "risk_level": risk_level,
+        "recommendations": recommendations
+    })
 
 def preprocess_input(input_df):
     """
@@ -97,6 +134,12 @@ def preprocess_input(input_df):
     # Create a copy to avoid modifying the original
     df = input_df.copy()
     
+    # Define the required features
+    required_features = [
+        'age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo',
+        'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bmi', 'bp_category'
+    ]
+    
     # Calculate age in years if not provided
     if 'age_years' not in df.columns and 'age' in df.columns:
         df['age_years'] = df['age']
@@ -109,32 +152,27 @@ def preprocess_input(input_df):
     if 'bp_category' not in df.columns and 'ap_hi' in df.columns and 'ap_lo' in df.columns:
         df['bp_category'] = df.apply(lambda row: categorize_blood_pressure(row['ap_hi'], row['ap_lo']), axis=1)
     
-    # Create medical features
-    df = create_medical_features(df)
+    # Check for missing required features
+    missing_features = [f for f in required_features if f not in df.columns]
+    if missing_features:
+        print(f"Warning: Missing features: {missing_features}")
+        # Fill missing features with default values
+        for feature in missing_features:
+            if feature in ['gender', 'cholesterol', 'gluc']:
+                df[feature] = 1  # Default to normal/female
+            elif feature in ['smoke', 'alco', 'active']:
+                df[feature] = 0  # Default to no
+            else:
+                df[feature] = 0  # Default to 0 for numeric features
     
-    # Encode categorical features
-    df = encode_categorical_features(df)
+    # Ensure categorical features are properly encoded if needed
+    if df['bp_category'].dtype == 'object':
+        # If the model expects encoded features, encode them
+        if hasattr(model, 'feature_names_in_') and any('bp_category_' in feat for feat in model.feature_names_in_):
+            df = encode_categorical_features(df)
     
-    # Select relevant features (same as used during training)
-    selected_features = [
-        'age_years', 'bmi', 'ap_hi', 'ap_lo', 'pulse_pressure', 'mean_arterial_pressure',
-        'gender_1', 'gender_2', 'cholesterol_1', 'cholesterol_2', 'cholesterol_3',
-        'gluc_1', 'gluc_2', 'gluc_3', 'smoke_0', 'smoke_1', 'alco_0', 'alco_1',
-        'active_0', 'active_1', 'bp_category_Normal', 'bp_category_Elevated',
-        'bp_category_Hypertension Stage 1', 'bp_category_Hypertension Stage 2',
-        'risk_factors_count', 'hypertensive_inactive'
-    ]
-    
-    # Keep only features that exist in the DataFrame
-    available_features = [f for f in selected_features if f in df.columns]
-    
-    # Fill missing features with 0
-    for feature in selected_features:
-        if feature not in df.columns:
-            df[feature] = 0
-    
-    # Return numpy array with selected features
-    return df[selected_features].values
+    # Return the features in the correct order
+    return df[required_features].values
 
 def categorize_blood_pressure(systolic, diastolic):
     """

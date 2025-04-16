@@ -36,35 +36,7 @@ def create_medical_features(df):
     
     # Make a copy to avoid modifying the original dataframe
     df_features = df.copy()
-    
-    # Create pulse pressure (difference between systolic and diastolic)
-    if 'ap_hi' in df_features.columns and 'ap_lo' in df_features.columns:
-        df_features['pulse_pressure'] = df_features['ap_hi'] - df_features['ap_lo']
-        print("Created pulse pressure feature")
-    
-    # Create mean arterial pressure (MAP)
-    if 'ap_hi' in df_features.columns and 'ap_lo' in df_features.columns:
-        df_features['mean_arterial_pressure'] = (df_features['ap_hi'] + 2 * df_features['ap_lo']) / 3
-        print("Created mean arterial pressure feature")
-    
-    # Create BMI categories
-    if 'bmi' in df_features.columns:
-        df_features['bmi_category'] = pd.cut(
-            df_features['bmi'],
-            bins=[0, 18.5, 25, 30, 35, 100],
-            labels=['Underweight', 'Normal', 'Overweight', 'Obese Class I', 'Obese Class II-III']
-        )
-        print("Created BMI category feature")
-    
-    # Create age groups
-    if 'age_years' in df_features.columns:
-        df_features['age_group'] = pd.cut(
-            df_features['age_years'],
-            bins=[0, 40, 50, 60, 100],
-            labels=['<40', '40-50', '50-60', '>60']
-        )
-        print("Created age group feature")
-    
+
     # Create combined risk factors count
     risk_factors = ['cholesterol', 'gluc', 'smoke', 'alco']
     if all(factor in df_features.columns for factor in risk_factors):
@@ -78,26 +50,6 @@ def create_medical_features(df):
             df_features['smoke'] = df_features['smoke'].astype(int)
         if pd.api.types.is_categorical_dtype(df_features['alco']):
             df_features['alco'] = df_features['alco'].astype(int)
-        df_features['cholesterol_elevated'] = (df_features['cholesterol'] > 1).astype(int)
-        df_features['glucose_elevated'] = (df_features['gluc'] > 1).astype(int)
-        
-        df_features['risk_factors_count'] = (
-            df_features['cholesterol_elevated'] +
-            df_features['glucose_elevated'] +
-            df_features['smoke'] +
-            df_features['alco']
-        )
-        print("Created risk factors count feature")
-    
-    # Create BP and lifestyle interaction features
-    if 'bp_category' in df_features.columns and 'active' in df_features.columns:
-        # Create a feature for hypertensive patients who are inactive
-        hypertension_cols = ['Hypertension Stage 1', 'Hypertension Stage 2']
-        df_features['hypertensive_inactive'] = (
-            (df_features['bp_category'].isin(hypertension_cols)) & 
-            (df_features['active'] == 0)
-        ).astype(int)
-        print("Created hypertensive inactive feature")
     
     print(f"Created dataset with {df_features.shape[1]} features")
     return df_features
@@ -148,6 +100,18 @@ def encode_categorical_features(df):
     
     print(f"Encoded dataset has {df_encoded.shape[1]} features")
     return df_encoded
+
+def select_13_features(df):
+    """
+    Select only the 13 required features for training and prediction.
+    """
+    required_features = [
+        'age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo',
+        'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bmi', 'bp_category'
+    ]
+    # Only keep columns that exist in the DataFrame
+    available_features = [f for f in required_features if f in df.columns]
+    return df[available_features]
 
 def select_features(df, target_col='cardio', method='f_classif', k=10):
     """
@@ -319,3 +283,8 @@ def create_spark_feature_pipeline(categorical_cols, numeric_cols):
     
     print("Spark feature pipeline created")
     return pipeline
+
+# Example usage in your workflow:
+# After cleaning and feature engineering, but before splitting or training:
+# df_selected = select_13_features(df_clean)
+# Now use df_selected for train/test split and model training

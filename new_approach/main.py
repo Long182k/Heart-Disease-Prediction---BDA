@@ -1,14 +1,3 @@
-#!/usr/bin/env python3
-"""
-Main Script for Cardiovascular Disease Prediction (XGBoost API-ready)
-
-This script:
-1. Loads and preprocesses data
-2. Performs feature engineering
-3. Trains and evaluates an XGBoost model
-4. Exports the trained model as a .pkl file for Flask API use
-"""
-
 import os
 import argparse
 import pandas as pd
@@ -34,8 +23,6 @@ def parse_arguments():
     parser.add_argument('--data_path', type=str, required=True, help='Path to the dataset')
     parser.add_argument('--output_dir', type=str, default='output', help='Directory to save outputs')
     parser.add_argument('--explore', action='store_true', help='Perform exploratory data analysis')
-    parser.add_argument('--feature_selection', type=str, choices=['f_classif', 'mutual_info', 'rfe', 'none'], default='none', help='Feature selection method')
-    parser.add_argument('--n_features', type=int, default=10, help='Number of features to select')
     parser.add_argument('--save_model', action='store_true', help='Save the trained model')
     return parser.parse_args()
 
@@ -45,30 +32,72 @@ def setup_directories(output_dir):
     os.makedirs(os.path.join(output_dir, 'results'), exist_ok=True)
 
 def run_classification_models_workflow(
-    df, output_dir, feature_selection='none', n_features=10, explore=False, save_model=True
+    df, output_dir, explore=False, save_model=True
 ):
     df_clean = clean_data(df)
     if explore:
         explore_data(df_clean)
-    df_features = create_medical_features(df_clean)
-    df_encoded = encode_categorical_features(df_features)
-    if feature_selection != 'none':
-        _, df_selected = select_features(df_encoded, method=feature_selection, k=n_features)
-    else:
-        df_selected = df_encoded
+    
+    # Define the 13 required features + target
+    features = [
+        'age', 'gender', 'height', 'weight', 'ap_hi', 'ap_lo',
+        'cholesterol', 'gluc', 'smoke', 'alco', 'active', 'bmi', 'bp_category'
+    ]
+    features_with_target = features + ['cardio']
+    
+    # Ensure we have all required features
+    df_selected = df_clean[features_with_target].copy()
+    
+    # If bmi is missing, calculate it
+    if df_selected['bmi'].isnull().any():
+        df_selected['bmi'] = df_selected['weight'] / ((df_selected['height'] / 100) ** 2)
+    
+    # If bp_category is missing, calculate it
+    if 'bp_category' not in df_selected.columns or df_selected['bp_category'].isnull().any():
+        from model_deployment import categorize_blood_pressure
+        df_selected['bp_category'] = df_selected.apply(
+            lambda row: categorize_blood_pressure(row['ap_hi'], row['ap_lo']), axis=1
+        )
+    
+    # Encode categorical features if needed
+    if df_selected['bp_category'].dtype == 'object':
+        df_selected = encode_categorical_features(df_selected)
+    
+    # Continue with the rest of the workflow...
+    # ...
+
+    # Optionally encode bp_category as integer if needed by your model
+    # from sklearn.preprocessing import LabelEncoder
+    # le = LabelEncoder()
+    # df_selected['bp_category'] = le.fit_transform(df_selected['bp_category'])
 
     from sklearn.model_selection import train_test_split
     train_df, temp_df = train_test_split(df_selected, test_size=0.2, random_state=42, stratify=df_selected['cardio'])
     val_df, test_df = train_test_split(temp_df, test_size=0.5, random_state=42, stratify=temp_df['cardio'])
 
-    X_train = train_df.drop(['cardio', 'id'], axis=1, errors='ignore')
+    # Prepare features and target
+    X_train = train_df.drop('cardio', axis=1)
     print("X_train.columns.tolist()",X_train.columns.tolist())
+
     y_train = train_df['cardio']
-    X_val = val_df.drop(['cardio', 'id'], axis=1, errors='ignore')
+    X_val = val_df.drop('cardio', axis=1)
     y_val = val_df['cardio']
-    X_test = test_df.drop(['cardio', 'id'], axis=1, errors='ignore')
+    X_test = test_df.drop('cardio', axis=1)
     y_test = test_df['cardio']
 
+    # Remove ID column if present
+    if 'id' in X_train.columns:
+        X_train = X_train.drop('id', axis=1)
+        X_val = X_val.drop('id', axis=1)
+        X_test = X_test.drop('id', axis=1)
+
+    # Drop non-numeric columns (e.g., original categorical columns)
+    X_train = X_train.select_dtypes(include=[np.number])
+    X_val = X_val.select_dtypes(include=[np.number])
+    X_test = X_test.select_dtypes(include=[np.number])
+
+    # Train and evaluate models
+    results = {}
     models = [
         {
             "model_name": "logistic_regression",
@@ -210,8 +239,6 @@ def main():
     run_classification_models_workflow(
         df,
         output_dir=args.output_dir,
-        feature_selection=args.feature_selection,
-        n_features=args.n_features,
         explore=args.explore,
         save_model=args.save_model
     )
