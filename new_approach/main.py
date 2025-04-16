@@ -38,6 +38,8 @@ from evaluation import (
     evaluate_sklearn_model, evaluate_spark_model,
     plot_confusion_matrix, plot_roc_curve
 )
+import pickle
+import xgboost as xgb
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -118,35 +120,9 @@ def get_model(model_name):
     else:
         raise ValueError(f"Unsupported model: {model_name}")
 
-def run_sklearn_workflow(args):
-    """Run the scikit-learn workflow."""
-    print("\n=== Running scikit-learn workflow ===\n")
-    
-    # Load and preprocess data
-    df = load_data(args.data_path)
-    df_clean = clean_data(df)
-    
-    # Exploratory data analysis
-    if args.explore:
-        explore_data(df_clean)
-    
-    # Feature engineering
-    df_features = create_medical_features(df_clean)
-    df_encoded = encode_categorical_features(df_features)
-    
-    # Feature selection
-    if args.feature_selection != 'none':
-        selected_features, df_selected = select_features(
-            df_encoded, 
-            method=args.feature_selection, 
-            k=args.n_features
-        )
-    else:
-        df_selected = df_encoded
-    
-    # Split data
-    train_df, val_df, test_df = split_data(df_selected)
-    
+def run_sklearn_xgb_workflow(train_df, val_df, test_df, output_dir):
+    """Train and evaluate XGBoost model, save as .pkl, print confusion matrix and report."""
+    print("\n=== Training XGBoost Model (for API deployment) ===\n")
     # Prepare features and target
     X_train = train_df.drop('cardio', axis=1)
     y_train = train_df['cardio']
@@ -154,118 +130,49 @@ def run_sklearn_workflow(args):
     y_val = val_df['cardio']
     X_test = test_df.drop('cardio', axis=1)
     y_test = test_df['cardio']
-    
+
     # Remove ID column if present
     if 'id' in X_train.columns:
         X_train = X_train.drop('id', axis=1)
         X_val = X_val.drop('id', axis=1)
         X_test = X_test.drop('id', axis=1)
-    
-    # Train and evaluate models
-    results = {}
-    
-    if args.model == 'all':
-        models = ['rf', 'gb', 'lr', 'svm']
-    else:
-        models = [args.model]
-    
-    for model_name in models:
-        print(f"\n--- Training {model_name} model ---\n")
-        
-        # Get model
-        model = get_model(model_name)
-        
-        # Train model
-        trained_model = train_sklearn_model(model, X_train, y_train, X_val, y_val)
-        
-        # Evaluate model
-        eval_results = evaluate_sklearn_model(trained_model, X_test, y_test)
-        results[model_name] = eval_results
-        
-        # Print results
-        print(f"\nResults for {model_name}:")
-        print(f"Accuracy: {eval_results['Accuracy']:.4f}")
-        print(f"Precision: {eval_results['Precision']:.4f}")
-        print(f"Recall: {eval_results['Recall']:.4f}")
-        print(f"F1 Score: {eval_results['F1 Score']:.4f}")
-        print(f"AUC: {eval_results['AUC']:.4f}")
-        print("\nClassification Report:")
-        print(eval_results['Classification Report'])
-        
-        # Plot confusion matrix
-        plot_confusion_matrix(
-            eval_results['y_true'], 
-            eval_results['y_pred'],
-            output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_confusion_matrix.png')
-        )
-        
-        # Plot ROC curve
-        plot_roc_curve(
-            eval_results['y_true'], 
-            eval_results['y_pred_proba'],
-            output_path=os.path.join(args.output_dir, 'visualizations', f'{model_name}_roc_curve.png')
-        )
-        
-        # Save model
-        if args.save_model:
-            save_model(
-                trained_model, 
-                os.path.join(args.output_dir, 'models', f'{model_name}_model.pkl')
-            )
-    
-    # Compare models
-    if len(models) > 1:
-        print("\n=== Model Comparison ===\n")
-        
-        # Create comparison table
-        comparison = pd.DataFrame({
-            model_name: {
-                'Accuracy': results[model_name]['Accuracy'],
-                'Precision': results[model_name]['Precision'],
-                'Recall': results[model_name]['Recall'],
-                'F1 Score': results[model_name]['F1 Score'],
-                'AUC': results[model_name]['AUC']
-            } for model_name in models
-        }).T
-        
-        print(comparison)
-        
-        # Save comparison
-        comparison.to_csv(os.path.join(args.output_dir, 'results', 'model_comparison.csv'))
-        
-        # Plot comparison
-        plt.figure(figsize=(12, 8))
-        comparison.plot(kind='bar', figsize=(12, 8))
-        plt.title('Model Comparison')
-        plt.ylabel('Score')
-        plt.xlabel('Model')
-        plt.xticks(rotation=0)
-        plt.legend(loc='lower right')
-        plt.tight_layout()
-        plt.savefig(os.path.join(args.output_dir, 'visualizations', 'model_comparison.png'))
-    
-    # Save model metrics in JSON format
-    model_metrics = []
-    for model_name in models:
-        model_metrics.append({
-            "model_name": model_name,
-            "accuracy": float(results[model_name]['Accuracy']),
-            "precision": float(results[model_name]['Precision']),
-            "recall": float(results[model_name]['Recall']),
-            "f1": float(results[model_name]['F1 Score']),
-            "auc": float(results[model_name]['AUC']),
-            "training_time": float(results[model_name]['Training Time']),
-            "best_params": results[model_name].get('Best Parameters', {})
-        })
-    
-    # Save model metrics to JSON file
-    import json
-    with open(os.path.join(args.output_dir, 'results', 'model_metrics.json'), 'w') as f:
-        json.dump(model_metrics, f, indent=2)
-    
-    print(f"Model metrics saved to {os.path.join(args.output_dir, 'results', 'model_metrics.json')}")
-    
-    return results
+
+    # Train XGBoost
+    model = xgb.XGBClassifier(
+        n_estimators=100,
+        max_depth=5,
+        learning_rate=0.1,
+        objective="binary:logistic",
+        random_state=42,
+        use_label_encoder=False,
+        eval_metric="logloss"
+    )
+    model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+
+    # Save model as .pkl
+    model_path = os.path.join(output_dir, "models", "xgboost_model.pkl")
+    with open(model_path, "wb") as f:
+        pickle.dump(model, f)
+    print(f"XGBoost model saved as .pkl to {model_path}")
+
+    # Evaluate
+    y_pred = model.predict(X_test)
+    y_pred_proba = model.predict_proba(X_test)[:, 1]
+    cm = confusion_matrix(y_test, y_pred)
+    report = classification_report(y_test, y_pred)
+
+    # Print confusion matrix and classification report
+    print("\nConfusion Matrix (XGBoost):")
+    print(cm)
+    print("\nClassification Report (XGBoost):")
+    print(report)
+
+    # Optionally, print ROC AUC
+    from sklearn.metrics import roc_auc_score
+    auc = roc_auc_score(y_test, y_pred_proba)
+    print(f"ROC AUC (XGBoost): {auc:.4f}")
+
+    return model
 
 def run_spark_workflow(args):
     """Run the Spark workflow."""
