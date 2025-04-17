@@ -40,6 +40,8 @@ webapp/.env/
 models/
 models_2/
 models_3_colabs/
+models_improved/
+plots/
 *.model
 *.pkl
 *.h5

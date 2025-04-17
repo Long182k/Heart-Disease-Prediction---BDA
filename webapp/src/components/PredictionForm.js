@@ -139,7 +139,7 @@ const PredictionForm = () => {
           { value: 1, label: "Yes" },
         ],
       },
-      bp_category_encoded: {
+      bp_category_numeric: {
         display_name: "Blood Pressure Category",
         type: "categorical",
         required: true,
@@ -169,7 +169,7 @@ const PredictionForm = () => {
           "smoke",
           "alco",
           "active",
-          "bp_category_encoded",
+          "bp_category_numeric",
         ].includes(name)
       )
       .map((name) => ({
@@ -182,7 +182,6 @@ const PredictionForm = () => {
   // Mutation for making predictions
   const predictionMutation = useMutation({
     mutationFn: (data) => {
-      // Convert age from years to days (multiply by 365.25 to account for leap years)
       const ageInDays = Math.round(parseFloat(data.age) * 365.25);
 
       // Calculate BMI if needed
@@ -192,11 +191,12 @@ const PredictionForm = () => {
       ).toFixed(1);
 
       // Use the selected blood pressure category instead of calculating it
-      const bp_category_encoded = data.bp_category_encoded || "Unknown";
+      const bp_category_numeric = data.bp_category_numeric || "Unknown";
 
       // Ensure all required fields are present and convert to correct types
       const processedData = {
-        age_years: parseInt(data.age), // Send age in years to the API
+        age: ageInDays,
+        age_years: parseInt(data.age),
         gender: parseInt(data.gender),
         height: parseInt(data.height),
         weight: parseFloat(data.weight),
@@ -208,7 +208,7 @@ const PredictionForm = () => {
         alco: parseInt(data.alco),
         active: parseInt(data.active),
         bmi: parseFloat(bmi),
-        bp_category_encoded: bp_category_encoded,
+        bp_category: bp_category_numeric,
       };
       return apiService.makePrediction(processedData);
     },
@@ -277,7 +277,7 @@ const PredictionForm = () => {
       "smoke",
       "alco",
       "active",
-      "bp_category_encoded",
+      "bp_category_numeric",
     ];
 
     // Check if all required fields are present
@@ -367,16 +367,16 @@ const PredictionForm = () => {
   if (isLoading) {
     return (
       <div className="flex justify-center items-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <div className="w-12 h-12 rounded-full border-b-2 animate-spin border-primary"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="rounded-lg border-destructive/50 bg-destructive/5 p-6">
-        <div className="flex items-center gap-2">
-          <AlertCircle className="h-5 w-5 text-destructive" />
+      <div className="p-6 rounded-lg border-destructive/50 bg-destructive/5">
+        <div className="flex gap-2 items-center">
+          <AlertCircle className="w-5 h-5 text-destructive" />
           <h3 className="font-medium">Failed to load form</h3>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
@@ -408,9 +408,9 @@ const PredictionForm = () => {
             {featureDefinitions &&
               featureDefinitions.map((feature) => renderInputField(feature))}
             {validationErrors.form && (
-              <div className="rounded-lg border-destructive/50 bg-destructive/5 p-4">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-destructive" />
+              <div className="p-4 rounded-lg border-destructive/50 bg-destructive/5">
+                <div className="flex gap-2 items-center">
+                  <AlertCircle className="w-5 h-5 text-destructive" />
                   <p className="text-sm text-destructive">
                     {validationErrors.form}
                   </p>
@@ -429,7 +429,7 @@ const PredictionForm = () => {
             <Button type="submit" disabled={predictionMutation.isPending}>
               {predictionMutation.isPending ? (
                 <>
-                  <span className="mr-2 inline-block h-4 w-4 animate-spin rounded-full border-2 border-solid border-current border-r-transparent"></span>
+                  <span className="inline-block mr-2 w-4 h-4 rounded-full border-2 border-current border-solid animate-spin border-r-transparent"></span>
                   Processing...
                 </>
               ) : (

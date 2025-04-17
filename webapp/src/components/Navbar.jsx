@@ -11,32 +11,29 @@ const Navbar = () => {
 
   return (
     <header className="border-b">
-      <div className="container mx-auto flex h-16 items-center px-4">
-        <Link to="/" className="flex items-center gap-2 font-bold text-xl">
-          <Heart className="h-6 w-6 text-red-500" />
-          <span>Heart Disease Predictor</span>
+      <div className="container flex items-center px-4 mx-auto h-16">
+        <Link to="/" className="flex gap-2 items-center text-xl font-bold">
+          <Heart className="w-6 h-6 text-red-500" />
+          <span className="font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 animate-pulse">CardioGuardian</span>
         </Link>
-        <nav className="ml-auto flex gap-6">
+        <nav className="flex gap-6 ml-auto">
           <Link 
             to="/" 
-            className={`text-sm font-medium transition-colors hover:text-primary ${
-              isActive('/') ? 'text-primary' : 'text-muted-foreground'
+            className={`text-sm font-medium transition-colors hover:text-primary ${ isActive('/') ? 'text-primary' : 'text-muted-foreground'
             }`}
           >
             Home
           </Link>
           <Link 
             to="/predict" 
-            className={`text-sm font-medium transition-colors hover:text-primary ${
-              isActive('/predict') ? 'text-primary' : 'text-muted-foreground'
+            className={`text-sm font-medium transition-colors hover:text-primary ${ isActive('/predict') ? 'text-primary' : 'text-muted-foreground'
             }`}
           >
             Make Prediction
           </Link>
           <Link 
             to="/metrics" 
-            className={`text-sm font-medium transition-colors hover:text-primary ${
-              isActive('/metrics') ? 'text-primary' : 'text-muted-foreground'
+            className={`text-sm font-medium transition-colors hover:text-primary ${ isActive('/metrics') ? 'text-primary' : 'text-muted-foreground'
             }`}
           >
             Model Metrics

@@ -18,7 +18,16 @@ from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier,
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, roc_curve
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.feature_selection import SelectFromModel, RFE
-from imblearn.over_sampling import SMOTE
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
+try:
+    from imblearn.over_sampling import SMOTE
+    HAS_SMOTE = True
+except ImportError:
+    print("Warning: imblearn.over_sampling.SMOTE could not be imported.")
+    print("Will use alternative class balancing method.")
+    HAS_SMOTE = False
+
 import xgboost as xgb
 import joblib
 import warnings
@@ -42,11 +51,27 @@ def load_and_preprocess_data(data_path):
         # Try to find the data file in other locations
         base_dir = os.path.dirname(os.path.abspath(__file__))
         parent_dir = os.path.dirname(base_dir)
+        
+        # Add more potential Kaggle paths
         alternative_paths = [
             os.path.join(parent_dir, 'data/cardio_data_processed.csv'),
             os.path.join(base_dir, 'cardio_data_processed.csv'),
-            os.path.join(base_dir, 'data/cardio_data_processed.csv')
+            '/kaggle/input/cardiovascular-disease/cardio_data_processed.csv',
+            '/kaggle/input/cardiovascular-disease/cardio_train.csv',  # Try original dataset name
+            '/kaggle/input/cardiovascular-disease-dataset/cardio_data_processed.csv',
+            '/kaggle/input/cardiovascular-disease-dataset/cardio_train.csv'
         ]
+        
+        # Search for any CSV file in the Kaggle input directory
+        kaggle_input_dir = '/kaggle/input'
+        if os.path.exists(kaggle_input_dir):
+            print("Searching for CSV files in Kaggle input directories...")
+            for root, dirs, files in os.walk(kaggle_input_dir):
+                for file in files:
+                    if file.endswith('.csv'):
+                        csv_path = os.path.join(root, file)
+                        print(f"Found CSV file: {csv_path}")
+                        alternative_paths.append(csv_path)
         
         for alt_path in alternative_paths:
             if os.path.exists(alt_path):
@@ -54,7 +79,7 @@ def load_and_preprocess_data(data_path):
                 print(f"Found data file at alternative location: {data_path}")
                 break
         else:
-            raise FileNotFoundError("Could not find data file in any expected location")
+            raise FileNotFoundError("Could not find data file in any expected location. Please check the dataset path.")
     
     # Load the data
     df = pd.read_csv(data_path)
@@ -73,8 +98,41 @@ def load_and_preprocess_data(data_path):
     features = [
         "age", "gender", "height", "weight", "ap_hi", "ap_lo", 
         "cholesterol", "gluc", "smoke", "alco", "active", 
-        "age_years", "bmi", "bp_category_encoded"
+        "age_years", "bmi"
     ]
+    
+    # Check if bp_category_encoded is a string and needs encoding
+    if 'bp_category_encoded' in df.columns:
+        # Check the data type
+        if df['bp_category_encoded'].dtype == 'object':
+            print("Converting bp_category_encoded from string to numeric")
+            # Create a mapping for blood pressure categories
+            bp_category_mapping = {
+                'Normal': 0,
+                'Elevated': 1,
+                'Hypertension Stage 1': 2,
+                'Hypertension Stage 2': 3,
+                'Hypertensive Crisis': 4
+            }
+            
+            # Apply the mapping and create a new numeric column
+            df['bp_category_numeric'] = df['bp_category_encoded'].map(bp_category_mapping)
+            
+            # Check if any values couldn't be mapped (will be NaN)
+            unmapped = df['bp_category_numeric'].isna().sum()
+            if unmapped > 0:
+                print(f"Warning: {unmapped} values in bp_category_encoded couldn't be mapped")
+                # Fill NaN values with a default (e.g., most common category)
+                df['bp_category_numeric'].fillna(df['bp_category_numeric'].mode()[0], inplace=True)
+            
+            # Add the new numeric feature to the features list
+            features.append('bp_category_numeric')
+            print("Added bp_category_numeric to features list")
+        else:
+            # If it's already numeric, just add it to the features
+            features.append('bp_category_encoded')
+    else:
+        print("Warning: bp_category_encoded not found in dataset")
     
     # Ensure all required features are in the dataset
     missing_features = [f for f in features if f not in df.columns]
@@ -127,6 +185,7 @@ def perform_feature_selection(X, y, features, method='rfe', n_features=10):
         plt.title('Feature Importance')
         plt.tight_layout()
         plt.savefig('plots/feature_importance.png')
+        plt.show()  # Display the feature importance plot
     
     return selected_features
 
@@ -141,10 +200,23 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
         X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
     )
     
-    # Apply SMOTE to handle class imbalance
-    smote = SMOTE(random_state=RANDOM_STATE)
-    X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
-    print(f"After SMOTE: {X_train_resampled.shape[0]} training samples")
+    # Handle class imbalance
+    if HAS_SMOTE:
+        # Use SMOTE if available
+        smote = SMOTE(random_state=RANDOM_STATE)
+        X_train_resampled, y_train_resampled = smote.fit_resample(X_train, y_train)
+        print(f"After SMOTE: {X_train_resampled.shape[0]} training samples")
+    else:
+        # Alternative: Use class weights in the models instead of SMOTE
+        print("Using class weights instead of SMOTE for handling class imbalance")
+        # Calculate class weights
+        class_counts = np.bincount(y_train)
+        total_samples = len(y_train)
+        class_weights = {i: total_samples / (len(class_counts) * count) for i, count in enumerate(class_counts)}
+        print(f"Class weights: {class_weights}")
+        
+        # No resampling, use original data
+        X_train_resampled, y_train_resampled = X_train, y_train
     
     # Scale the features
     scaler = StandardScaler()
@@ -154,10 +226,11 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
     # Save the scaler for later use
     joblib.dump(scaler, 'models_improved/scaler.joblib')
     
-    # Define models to train
+    # Define models to train - adjust to use class_weight when SMOTE is not available
     models = {
         'logistic_regression': {
-            'model': LogisticRegression(random_state=RANDOM_STATE, max_iter=1000),
+            'model': LogisticRegression(random_state=RANDOM_STATE, max_iter=1000, 
+                                        class_weight='balanced' if not HAS_SMOTE else None),
             'params': {
                 'C': [0.001, 0.01, 0.1, 1, 10],
                 'penalty': ['l1', 'l2'],
@@ -165,13 +238,14 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
             }
         },
         'random_forest': {
-            'model': RandomForestClassifier(random_state=RANDOM_STATE),
+            'model': RandomForestClassifier(random_state=RANDOM_STATE,
+                                           class_weight='balanced' if not HAS_SMOTE else None),
             'params': {
                 'n_estimators': [100, 200, 300],
                 'max_depth': [5, 10, 15, None],
                 'min_samples_split': [2, 5, 10],
                 'max_features': ['sqrt', 'log2'],
-                'class_weight': ['balanced', None]
+                'class_weight': ['balanced', None] if HAS_SMOTE else ['balanced']
             }
         },
         'gradient_boosting': {
@@ -184,13 +258,14 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
             }
         },
         'xgboost': {
-            'model': xgb.XGBClassifier(random_state=RANDOM_STATE),
+            'model': xgb.XGBClassifier(random_state=RANDOM_STATE,
+                                      scale_pos_weight=class_weights[1]/class_weights[0] if not HAS_SMOTE else 1),
             'params': {
                 'n_estimators': [50, 100, 200],
                 'learning_rate': [0.01, 0.1, 0.2],
                 'max_depth': [3, 5, 7],
                 'subsample': [0.7, 0.8, 0.9],
-                'scale_pos_weight': [1, 3, 5]
+                'scale_pos_weight': [1, 3, 5] if HAS_SMOTE else [class_weights[1]/class_weights[0]]
             }
         }
     }
@@ -241,20 +316,31 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
         # Calculate training time
         training_time = time.time() - start_time
         
-        # Store results
-        result = {
+        # Plot and save confusion matrix
+        cm = confusion_matrix(y_test, y_pred)
+        plt.figure(figsize=(8, 6))
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['No Disease', 'Disease'])
+        disp.plot(cmap=plt.cm.Blues, values_format='d')
+        plt.title(f'Confusion Matrix - {model_name}')
+        plt.tight_layout()
+        plt.savefig(f'plots/confusion_matrix_{model_name}.png')
+        plt.show()
+        plt.close()
+        
+        # Convert numpy types to Python native types before adding to results
+        model_result = {
             'model_name': model_name,
-            'accuracy': accuracy,
-            'precision': precision,
-            'recall': recall,
-            'f1': f1,
-            'auc': auc,
-            'training_time': training_time,
-            'best_params': grid_search.best_params_,
-            'optimal_threshold': optimal_threshold
+            'accuracy': float(accuracy),
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1': float(f1),
+            'auc': float(auc),
+            'training_time': float(training_time),
+            'best_params': best_model.get_params(),
+            'optimal_threshold': float(optimal_threshold)
         }
         
-        results.append(result)
+        results.append(model_result)
         
         print(f"{model_name} results:")
         print(f"  Accuracy: {accuracy:.4f}")
@@ -278,7 +364,11 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
     print("\nCreating ensemble model...")
     estimators = [(name, model) for name, model in best_models.items()]
     ensemble = VotingClassifier(estimators=estimators, voting='soft')
+    
+    # Calculate ensemble training time
+    ensemble_start_time = time.time()
     ensemble.fit(X_train_scaled, y_train_resampled)
+    ensemble_training_time = time.time() - ensemble_start_time
     
     # Evaluate ensemble model
     y_pred_ensemble = ensemble.predict(X_test_scaled)
@@ -295,19 +385,28 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
     optimal_idx = np.argmax(tpr - fpr)
     optimal_threshold_ensemble = thresholds[optimal_idx]
     
+    # Plot and save confusion matrix for ensemble
+    cm_ensemble = confusion_matrix(y_test, y_pred_ensemble)
+    plt.figure(figsize=(8, 6))
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm_ensemble, display_labels=['No Disease', 'Disease'])
+    disp.plot(cmap=plt.cm.Blues, values_format='d')
+    plt.title('Confusion Matrix - Ensemble')
+    plt.tight_layout()
+    plt.savefig('plots/confusion_matrix_ensemble.png')
+    plt.show()
+    plt.close()
+    
     # Store ensemble results
     ensemble_result = {
         'model_name': 'ensemble',
-        'accuracy': accuracy_ensemble,
-        'precision': precision_ensemble,
-        'recall': recall_ensemble,
-        'f1': f1_ensemble,
-        'auc': auc_ensemble,
-        'training_time': sum(r['training_time'] for r in results),
-        'best_params': {model_name: r['best_params'] for model_name, r in zip(models.keys(), results)},
-        'optimal_threshold': optimal_threshold_ensemble
+        'accuracy': float(accuracy_ensemble),
+        'precision': float(precision_ensemble),
+        'recall': float(recall_ensemble),
+        'f1': float(f1_ensemble),
+        'auc': float(auc_ensemble),
+        'training_time': float(ensemble_training_time),
+        'optimal_threshold': float(optimal_threshold_ensemble)
     }
-    
     results.append(ensemble_result)
     
     print("Ensemble model results:")
@@ -330,9 +429,25 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
     with open('models_improved/feature_names.json', 'w') as f:
         json.dump(features, f)
     
+    # Define the convert_numpy_types function
+    def convert_numpy_types(obj):
+        """Convert numpy types to Python native types for JSON serialization."""
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        elif isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: convert_numpy_types(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_numpy_types(i) for i in obj]
+        else:
+            return obj
+    
     # Save results to JSON
     with open('models_improved/model_metrics.json', 'w') as f:
-        json.dump(results, f, indent=2)
+        json.dump(convert_numpy_types(results), f, indent=2)
     
     # Plot ROC curves
     plt.figure(figsize=(10, 8))
@@ -356,6 +471,31 @@ def train_and_evaluate_models(X, y, features, selected_features=None):
     plt.title('ROC Curves')
     plt.legend()
     plt.savefig('plots/roc_curves.png')
+    plt.show()
+    
+    # Create a combined confusion matrix visualization
+    plt.figure(figsize=(15, 10))
+    model_names = list(best_models.keys()) + ['ensemble']
+    num_models = len(model_names)
+    rows = (num_models + 1) // 2
+    
+    for i, model_name in enumerate(model_names):
+        plt.subplot(rows, 2, i+1)
+        
+        if model_name == 'ensemble':
+            cm = confusion_matrix(y_test, y_pred_ensemble)
+        else:
+            model = best_models[model_name]
+            cm = confusion_matrix(y_test, model.predict(X_test_scaled))
+        
+        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=['No Disease', 'Disease'])
+        disp.plot(cmap=plt.cm.Blues, values_format='d', ax=plt.gca(), colorbar=False)
+        plt.title(f'{model_name}')
+    
+    plt.tight_layout()
+    plt.savefig('plots/all_confusion_matrices.png')
+    plt.show()
+    plt.close()
     
     return results, best_models, ensemble
 
@@ -363,18 +503,36 @@ def main():
     """Main function to run the training pipeline."""
     print("Starting improved heart disease prediction model training")
     
-    # Load and preprocess data
-    data_path = 'data/cardio_data_processed.csv'
-    X, y, features = load_and_preprocess_data(data_path)
+    # Try multiple possible data paths
+    possible_paths = [
+        '/kaggle/input/cardiovascular-disease/cardio_data_processed.csv',
+        '/kaggle/input/cardiovascular-disease/cardio_train.csv',
+        '/kaggle/input/cardiovascular-disease-dataset/cardio_data_processed.csv',
+        'data/cardio_data_processed.csv'
+    ]
+    
+    # Try each path until one works
+    for data_path in possible_paths:
+        try:
+            print(f"Attempting to load data from {data_path}")
+            X, y, features = load_and_preprocess_data(data_path)
+            # If we get here, the data was loaded successfully
+            break
+        except FileNotFoundError as e:
+            print(f"Could not load from {data_path}: {e}")
+    else:
+        # If we get here, none of the paths worked
+        raise FileNotFoundError("Could not find the dataset in any of the expected locations. Please check the dataset path.")
     
     # Perform feature selection
-    selected_features = perform_feature_selection(X, y, features, method='model_based')
+    selected_features = perform_feature_selection(X, y, features, method=None)
     
     # Train and evaluate models
     results, best_models, ensemble = train_and_evaluate_models(X, y, features, selected_features)
     
     # Find the best model based on AUC
     best_result = max(results, key=lambda x: x['auc'])
+    
     best_model_name = best_result['model_name']
     
     print(f"\nBest model: {best_model_name}")
