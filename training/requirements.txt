@@ -10,7 +10,8 @@ imbalanced-learn==0.10.1
 joblib==1.2.0
 flask==2.2.3
 flask-cors==3.0.10
-sklearn
+scikit-learn
+
 # GPU acceleration libraries
 cudf-cu11
 cuml-cu11

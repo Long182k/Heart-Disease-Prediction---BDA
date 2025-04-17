@@ -1,8 +1,14 @@
-import React from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { AlertCircle } from 'lucide-react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import apiService from '../services/api';
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertCircle } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "./ui/card";
+import apiService from "../services/api";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -11,8 +17,8 @@ import {
   Title,
   Tooltip,
   Legend,
-} from 'chart.js';
-import { Bar } from 'react-chartjs-2';
+} from "chart.js";
+import { Bar } from "react-chartjs-2";
 
 // Register ChartJS components
 ChartJS.register(
@@ -26,23 +32,26 @@ ChartJS.register(
 
 const ModelMetrics = () => {
   // Fetch model metrics using React Query
-  const { data: metrics, isLoading, error } = useQuery({
-    queryKey: ['modelMetrics'],
+  const {
+    data: metrics,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["modelMetrics"],
     queryFn: apiService.getModelMetrics,
-    staleTime: Infinity, // Metrics won't change during the session
+    staleTime: Infinity,
   });
-
 
   // Chart options
   const options = {
     responsive: true,
     plugins: {
       legend: {
-        position: 'top',
+        position: "top",
       },
       title: {
         display: true,
-        text: 'Model Performance Comparison',
+        text: "Model Performance Comparison",
       },
     },
     scales: {
@@ -58,41 +67,43 @@ const ModelMetrics = () => {
     responsive: true,
     plugins: {
       legend: {
-        position: 'top',
+        position: "top",
       },
       title: {
         display: true,
-        text: 'Model Training Times (seconds)',
+        text: "Model Training Times (seconds)",
       },
     },
   };
 
   // Prepare performance chart data
   const prepareChartData = () => {
-    const labels = metrics.map(m => m.model_name.replace('_', ' ').toUpperCase());
-    
+    const labels = metrics.map((m) =>
+      m.model_name.replace("_", " ").toUpperCase()
+    );
+
     return {
       labels,
       datasets: [
         {
-          label: 'Accuracy',
-          data: metrics.map(m => m.accuracy),
-          backgroundColor: 'rgba(54, 162, 235, 0.6)',
-          borderColor: 'rgba(54, 162, 235, 1)',
+          label: "Accuracy",
+          data: metrics.map((m) => m.accuracy),
+          backgroundColor: "rgba(54, 162, 235, 0.6)",
+          borderColor: "rgba(54, 162, 235, 1)",
           borderWidth: 1,
         },
         {
-          label: 'AUC',
-          data: metrics.map(m => m.auc),
-          backgroundColor: 'rgba(153, 102, 255, 0.6)',
-          borderColor: 'rgba(153, 102, 255, 1)',
+          label: "AUC",
+          data: metrics.map((m) => m.auc),
+          backgroundColor: "rgba(153, 102, 255, 0.6)",
+          borderColor: "rgba(153, 102, 255, 1)",
           borderWidth: 1,
         },
         {
-          label: 'F1 Score',
-          data: metrics.map(m => m.f1),
-          backgroundColor: 'rgba(255, 159, 64, 0.6)',
-          borderColor: 'rgba(255, 159, 64, 1)',
+          label: "F1 Score",
+          data: metrics.map((m) => m.f1),
+          backgroundColor: "rgba(255, 159, 64, 0.6)",
+          borderColor: "rgba(255, 159, 64, 1)",
           borderWidth: 1,
         },
       ],
@@ -101,16 +112,18 @@ const ModelMetrics = () => {
 
   // Prepare time chart data
   const prepareTimeChartData = () => {
-    const labels = metrics.map(m => m.model_name.replace('_', ' ').toUpperCase());
-    
+    const labels = metrics.map((m) =>
+      m.model_name.replace("_", " ").toUpperCase()
+    );
+
     return {
       labels,
       datasets: [
         {
-          label: 'Training Time (seconds)',
-          data: metrics.map(m => m.training_time),
-          backgroundColor: 'rgba(255, 99, 132, 0.6)',
-          borderColor: 'rgba(255, 99, 132, 1)',
+          label: "Training Time (seconds)",
+          data: metrics.map((m) => m.training_time),
+          backgroundColor: "rgba(255, 99, 132, 0.6)",
+          borderColor: "rgba(255, 99, 132, 1)",
           borderWidth: 1,
         },
       ],
@@ -151,8 +164,8 @@ const ModelMetrics = () => {
   }
 
   // Find best model based on AUC score
-  const bestModel = metrics.reduce((prev, current) => 
-    (prev.auc > current.auc) ? prev : current
+  const bestModel = metrics.reduce((prev, current) =>
+    prev.auc > current.auc ? prev : current
   );
 
   return (
@@ -160,7 +173,8 @@ const ModelMetrics = () => {
       <div className="space-y-2 text-center">
         <h1 className="text-3xl font-bold">Model Performance Metrics</h1>
         <p className="text-muted-foreground">
-          Comparing the performance of different machine learning models for heart disease prediction
+          Comparing the performance of different machine learning models for
+          heart disease prediction
         </p>
       </div>
 
@@ -208,19 +222,28 @@ const ModelMetrics = () => {
                   <th className="py-3 px-4 text-left font-medium">Recall</th>
                   <th className="py-3 px-4 text-left font-medium">F1 Score</th>
                   <th className="py-3 px-4 text-left font-medium">AUC</th>
-                  <th className="py-3 px-4 text-left font-medium">Training Time (s)</th>
+                  <th className="py-3 px-4 text-left font-medium">
+                    Training Time (s)
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {metrics.map((model) => (
-                  <tr key={model.model_name} className="border-b hover:bg-muted/50">
-                    <td className="py-3 px-4 font-medium">{model.model_name.replace('_', ' ').toUpperCase()}</td>
+                  <tr
+                    key={model.model_name}
+                    className="border-b hover:bg-muted/50"
+                  >
+                    <td className="py-3 px-4 font-medium">
+                      {model.model_name.replace("_", " ").toUpperCase()}
+                    </td>
                     <td className="py-3 px-4">{model.accuracy?.toFixed(4)}</td>
                     <td className="py-3 px-4">{model.precision?.toFixed(4)}</td>
                     <td className="py-3 px-4">{model.recall?.toFixed(4)}</td>
                     <td className="py-3 px-4">{model.f1?.toFixed(4)}</td>
                     <td className="py-3 px-4">{model.auc?.toFixed(4)}</td>
-                    <td className="py-3 px-4">{model.training_time?.toFixed(2)}</td>
+                    <td className="py-3 px-4">
+                      {model.training_time?.toFixed(2)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -235,12 +258,17 @@ const ModelMetrics = () => {
         </CardHeader>
         <CardContent>
           <p>
-            The <span className="font-bold">{bestModel.model_name.replace('_', ' ').toUpperCase()}</span> model 
-            achieved the highest AUC score of <span className="font-bold">{bestModel.auc?.toFixed(4)}</span>.
+            The{" "}
+            <span className="font-bold">
+              {bestModel.model_name.replace("_", " ").toUpperCase()}
+            </span>{" "}
+            model achieved the highest AUC score of{" "}
+            <span className="font-bold">{bestModel.auc?.toFixed(4)}</span>.
           </p>
           <p className="mt-2 text-sm text-muted-foreground">
-            AUC (Area Under the ROC Curve) is a key metric for evaluating classification model performance,
-            especially for imbalanced datasets like those commonly found in medical applications.
+            AUC (Area Under the ROC Curve) is a key metric for evaluating
+            classification model performance, especially for imbalanced datasets
+            like those commonly found in medical applications.
           </p>
         </CardContent>
       </Card>

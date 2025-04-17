@@ -36,7 +36,11 @@ except ImportError:
     spark_available = False
 
 app = Flask(__name__, static_folder='../webapp/build')
-CORS(app)
+# CORS(app)  # This line is commented out, which is causing the issue
+
+# Change it to:
+app = Flask(__name__, static_folder='../webapp/build')
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # Enable CORS for all API routes
 
 # Create Spark session
 def create_spark_session(app_name="HeartDiseaseAPI"):
@@ -261,7 +265,7 @@ def preprocess_input(input_data):
 def predict():
     """Make a prediction based on input data."""
     global model, feature_columns
-    
+
     if model is None:
         return jsonify({'error': 'Model not loaded'}), 500
     
@@ -437,6 +441,7 @@ def predict():
 def get_metrics():
     base_dir = os.path.dirname(os.path.abspath(__file__))
     metrics_file = os.path.join(base_dir, 'models_3_colabs/model_metrics.json')
+    print("metrics_file",metrics_file)
     
     if os.path.exists(metrics_file):
         with open(metrics_file, 'r') as f:
@@ -470,4 +475,4 @@ if __name__ == '__main__':
         print("Warning: Model or feature columns could not be loaded, some endpoints may not work")
     
     # Run the app
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5002, debug=True)
