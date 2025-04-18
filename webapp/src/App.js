@@ -5,6 +5,10 @@ import Home from "./components/Home";
 import PredictionForm from "./components/PredictionForm";
 import Results from "./components/Results";
 import ModelMetrics from "./components/ModelMetrics";
+import Login from "./components/Login";
+import Register from "./components/Register";
+import UserProfile from "./components/UserProfile";
+import AdminDashboard from "./components/AdminDashboard";
 
 function App() {
   return (
@@ -17,12 +21,16 @@ function App() {
             <Route path="/predict" element={<PredictionForm />} />
             <Route path="/results" element={<Results />} />
             <Route path="/metrics" element={<ModelMetrics />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/register" element={<Register />} />
+            <Route path="/profile" element={<UserProfile />} />
+            <Route path="/results/:predictionId" element={<Results />} />
+            <Route path="/admin" element={<AdminDashboard />} />
           </Routes>
         </main>
         <footer className="py-6 border-t">
           <div className="container mx-auto text-sm text-center text-muted-foreground">
             <p>
-              {" "}
               {new Date().getFullYear()} CardioGuardian - A Big Data Analytics
               Project
             </p>

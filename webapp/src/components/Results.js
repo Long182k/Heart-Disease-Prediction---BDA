@@ -5,11 +5,40 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 
+import { useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import apiService from '../services/api';
+
 const Results = () => {
   const location = useLocation();
-  const { result, patientData } = location.state || {};
+  const { predictionId } = useParams();
+  const { result: locationResult, patientData: locationPatientData } = location.state || {};
+  
+  // If we have a predictionId, fetch the prediction
+  const { data: fetchedPrediction, isLoading } = useQuery({
+    queryKey: ['prediction', predictionId],
+    queryFn: () => apiService.getPredictionById(predictionId),
+    enabled: !!predictionId,
+  });
+  
+  // Use either the fetched prediction or the one from location state
+  const result = predictionId && fetchedPrediction 
+    ? fetchedPrediction.prediction_result 
+    : locationResult;
+    
+  const patientData = predictionId && fetchedPrediction 
+    ? fetchedPrediction.patient_data 
+    : locationPatientData;
 
-  // If no result data is available, redirect to prediction form
+  // If loading a prediction by ID, show loading state
+  if (predictionId && isLoading) {
+    return (
+      <div className="flex flex-col justify-center items-center pt-12 space-y-4">
+        <h3 className="text-xl font-semibold">Loading prediction...</h3>
+      </div>
+    );
+  }
+
   if (!result) {
     return (
       <div className="flex flex-col justify-center items-center pt-12 space-y-4">
@@ -21,8 +50,7 @@ const Results = () => {
       </div>
     );
   }
-
-  // Determine risk level icon and color
+  
   const getRiskLevelIcon = () => {
     switch(result.risk_level) {
       case 'Low':

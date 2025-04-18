@@ -9,6 +9,10 @@ import joblib
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import our new modules
+from db import init_db, register_user, login_user, save_prediction, get_user_predictions, get_prediction_by_id
+from auth import generate_token, token_required
+
 app = Flask(__name__, static_folder='../webapp/build')
 CORS(app, resources={r"/api/*": {"origins": "*"}})
 
@@ -19,13 +23,19 @@ feature_columns = None
 optimal_threshold = 0.5
 scaler = None
 
+# Initialize the database when the application starts
+# Instead of using before_first_request, we'll initialize the database at startup
+print("Initializing database...")
+init_db()
+print("Database initialization complete.")
+
 def load_model():
     """Load the trained model."""
     global model, model_type, feature_columns, optimal_threshold, scaler
     
     # Get the model metrics to find the best model
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    
+        
     # First try the models_improved directory
     metrics_file = os.path.join(base_dir, 'models_improved/model_metrics.json')
     print(f"Trying metrics file: {metrics_file}")
@@ -248,6 +258,52 @@ def preprocess_input(input_data):
         print(f"Error preprocessing input: {e}")
         return None
 
+@app.route('/api/auth/register', methods=['POST'])
+def register():
+    """Register a new user."""
+    data = request.json
+    
+    # Validate input
+    if not data or not data.get('username') or not data.get('email') or not data.get('password'):
+        return jsonify({'message': 'Missing required fields'}), 400
+    
+    # Register the user
+    result = register_user(data['username'], data['email'], data['password'])
+    
+    if result['success']:
+        # Generate token with role
+        token = generate_token(result['user']['id'], result['user']['username'], result['user']['role'])
+        return jsonify({
+            'message': 'User registered successfully',
+            'token': token,
+            'user': result['user']
+        }), 201
+    else:
+        return jsonify({'message': result['message']}), 400
+
+@app.route('/api/auth/login', methods=['POST'])
+def login():
+    """Login a user."""
+    data = request.json
+    
+    # Validate input
+    if not data or not data.get('username') or not data.get('password'):
+        return jsonify({'message': 'Missing username or password'}), 400
+    
+    # Login the user
+    result = login_user(data['username'], data['password'])
+    
+    if result['success']:
+        # Generate token with role
+        token = generate_token(result['user']['id'], result['user']['username'], result['user']['role'])
+        return jsonify({
+            'message': 'Login successful',
+            'token': token,
+            'user': result['user']
+        })
+    else:
+        return jsonify({'message': result['message']}), 401
+
 @app.route('/api/predict', methods=['POST'])
 def predict():
     """Make a prediction based on input data."""
@@ -264,14 +320,6 @@ def predict():
         input_data = request.json
         if not input_data:
             return jsonify({'error': 'No input data provided'}), 400
-        
-        # # Calculate BMI if not provided but weight and height are available
-        # if 'weight' in input_data and 'height' in input_data and ('bmi' not in input_data or input_data['bmi'] == 0):
-        #     weight_kg = float(input_data['weight'])
-        #     height_m = float(input_data['height']) / 100  # Convert height from cm to m
-        #     calculated_bmi = weight_kg / (height_m * height_m)
-        #     input_data['bmi'] = round(calculated_bmi, 1)  # Round to 1 decimal place
-        #     print(f"Calculated BMI: {input_data['bmi']} from weight: {weight_kg}kg and height: {height_m}m")
         
         # Get blood pressure category for response
         bp_category = input_data.get('bp_category', 'Unknown')
@@ -411,8 +459,43 @@ def predict():
                 'bp_category': bp_category,
                 'reason': reason,
                 'advice': advice,
-                'feature_importance': feature_importance
+                'feature_importance': feature_importance,
+                'input_summary': {
+                    'age': age,
+                    'cholesterol': cholesterol,
+                    'glucose': glucose,
+                    'bmi': bmi,
+                    'smoke': smoke,
+                    'alco': alco,
+                    'active': active,
+                    'ap_hi': ap_hi,
+                    'ap_lo': ap_lo,
+                    'bp_category': bp_category,
+                    'risk_factors_count': risk_factors_count
+                }
             }
+            
+            # Save prediction if user is authenticated
+            auth_header = request.headers.get('Authorization')
+            if auth_header and auth_header.startswith('Bearer '):
+                from auth import decode_token
+                token = auth_header.split(' ')[1]
+                decoded = decode_token(token)
+                
+                if decoded and 'success' in decoded and decoded['success']:
+                    # Save prediction to database
+                    user_id = decoded.get('user_id')
+                    if user_id:
+                        save_result = save_prediction(user_id, response, input_data)
+                        if save_result['success']:
+                            response['prediction_id'] = save_result['prediction']['id']
+                        else:
+                            print(f"Warning: Failed to save prediction: {save_result['message']}")
+                    else:
+                        print("Warning: User ID not found in decoded token")
+                else:
+                    error_msg = decoded.get('message', 'Invalid token') if decoded else 'Token decoding failed'
+                    print(f"Warning: Authentication failed - {error_msg}")
             
             return jsonify(response)
         except Exception as e:
@@ -421,6 +504,28 @@ def predict():
     except Exception as e:
         print(f"Error processing request: {e}")
         return jsonify({'error': f'Error processing request: {e}'}), 500
+
+@app.route('/api/user/predictions', methods=['GET'])
+@token_required
+def user_predictions():
+    """Get all predictions for the authenticated user."""
+    user_id = request.user['id']
+    result = get_user_predictions(user_id)
+    
+    if result['success']:
+        return jsonify(result['predictions'])
+    else:
+        return jsonify({'message': result['message']}), 500
+
+@app.route('/api/predictions/<prediction_id>', methods=['GET'])
+def get_prediction(prediction_id):
+    """Get a specific prediction by ID."""
+    result = get_prediction_by_id(prediction_id)
+    
+    if result['success']:
+        return jsonify(result['prediction'])
+    else:
+        return jsonify({'message': result['message']}), 404
 
 @app.route('/api/features', methods=['GET'])
 def get_features():
@@ -445,6 +550,7 @@ def get_metrics():
     # If still not found, try the models directory
     if not os.path.exists(metrics_file):
         metrics_file = os.path.join(base_dir, 'models/model_metrics.json')
+        print('metrics_file',metrics_file)
     
     if os.path.exists(metrics_file):
         with open(metrics_file, 'r') as f:
@@ -452,6 +558,128 @@ def get_metrics():
         return jsonify(model_metrics)
     else:
         return jsonify({'error': 'Model metrics file not found'}), 404
+
+@app.route('/api/statistics', methods=['GET'])
+def get_prediction_statistics():
+    """Get statistics on heart disease predictions across all users."""
+    try:
+        from db import get_all_predictions
+        
+        # Get all predictions from the database
+        result = get_all_predictions()
+        
+        if not result['success']:
+            return jsonify({'error': result['message']}), 500
+            
+        predictions = result['predictions']
+        
+        if not predictions:
+            return jsonify({
+                'message': 'No predictions found',
+                'statistics': {
+                    'total_predictions': 0
+                }
+            })
+        
+        # Calculate statistics
+        total_predictions = len(predictions)
+        positive_predictions = sum(1 for p in predictions if p['prediction_data'].get('prediction') == 1)
+        negative_predictions = total_predictions - positive_predictions
+        
+        # Risk level distribution
+        risk_levels = {
+            'Low': sum(1 for p in predictions if p['prediction_data'].get('risk_level') == 'Low'),
+            'Moderate': sum(1 for p in predictions if p['prediction_data'].get('risk_level') == 'Moderate'),
+            'High': sum(1 for p in predictions if p['prediction_data'].get('risk_level') == 'High')
+        }
+        
+        # BP category distribution
+        bp_categories = {}
+        for p in predictions:
+            bp_category = p['prediction_data'].get('bp_category', 'Unknown')
+            bp_categories[bp_category] = bp_categories.get(bp_category, 0) + 1
+        
+        # Age distribution
+        age_groups = {
+            '< 30': 0,
+            '30-40': 0,
+            '41-50': 0,
+            '51-60': 0,
+            '> 60': 0
+        }
+        
+        for p in predictions:
+            age = p['input_data'].get('age_years', 0)
+            if age < 30:
+                age_groups['< 30'] += 1
+            elif age <= 40:
+                age_groups['30-40'] += 1
+            elif age <= 50:
+                age_groups['41-50'] += 1
+            elif age <= 60:
+                age_groups['51-60'] += 1
+            else:
+                age_groups['> 60'] += 1
+        
+        # Risk factors analysis
+        risk_factors = {
+            'cholesterol_high': sum(1 for p in predictions if p['input_data'].get('cholesterol', 1) > 1),
+            'glucose_high': sum(1 for p in predictions if p['input_data'].get('gluc', 1) > 1),
+            'smoking': sum(1 for p in predictions if p['input_data'].get('smoke', 0) == 1),
+            'alcohol': sum(1 for p in predictions if p['input_data'].get('alco', 0) == 1),
+            'inactive': sum(1 for p in predictions if p['input_data'].get('active', 1) == 0),
+            'high_bp': sum(1 for p in predictions if p['input_data'].get('ap_hi', 0) >= 130 or p['input_data'].get('ap_lo', 0) >= 80),
+            'overweight': sum(1 for p in predictions if p['input_data'].get('bmi', 0) >= 25)
+        }
+        
+        # Average probability by risk level
+        avg_probability = {
+            'overall': sum(p['prediction_data'].get('probability', 0) for p in predictions) / total_predictions,
+            'Low': 0,
+            'Moderate': 0,
+            'High': 0
+        }
+        
+        # Count for calculating averages
+        risk_level_counts = {
+            'Low': risk_levels['Low'],
+            'Moderate': risk_levels['Moderate'],
+            'High': risk_levels['High']
+        }
+        
+        # Calculate sum of probabilities by risk level
+        for p in predictions:
+            risk_level = p['prediction_data'].get('risk_level')
+            if risk_level in ['Low', 'Moderate', 'High']:
+                avg_probability[risk_level] += p['prediction_data'].get('probability', 0)
+        
+        # Calculate averages
+        for level in ['Low', 'Moderate', 'High']:
+            if risk_level_counts[level] > 0:
+                avg_probability[level] /= risk_level_counts[level]
+        
+        # Prepare response
+        statistics = {
+            'total_predictions': total_predictions,
+            'positive_predictions': positive_predictions,
+            'negative_predictions': negative_predictions,
+            'positive_percentage': (positive_predictions / total_predictions) * 100 if total_predictions > 0 else 0,
+            'risk_level_distribution': risk_levels,
+            'bp_category_distribution': bp_categories,
+            'age_distribution': age_groups,
+            'risk_factors': risk_factors,
+            'average_probability': avg_probability,
+            'last_prediction_date': max(p['created_at'] for p in predictions) if predictions else None
+        }
+        
+        return jsonify({
+            'message': 'Statistics retrieved successfully',
+            'statistics': statistics
+        })
+        
+    except Exception as e:
+        print(f"Error generating prediction statistics: {e}")
+        return jsonify({'error': f'Error generating statistics: {str(e)}'}), 500
 
 @app.route('/api/model_info', methods=['GET'])
 def get_model_info():

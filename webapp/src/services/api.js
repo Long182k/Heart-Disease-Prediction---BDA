@@ -1,64 +1,129 @@
 import axios from "axios";
-
-const API_URL = process.env.REACT_APP_API_URL || "http://localhost:5002/api";
-
-// Create axios instance with base URL
+import authService from "./authService";
+const API_URL = "http://localhost:5002/";
 const api = axios.create({
   baseURL: API_URL,
   headers: {
     "Content-Type": "application/json",
   },
 });
-
-// Error handler for API requests
-const handleApiError = (error) => {
-  if (error.response) {
-    // The request was made and the server responded with a status code outside the 2xx range
-    console.error("API Error Response:", error.response.data);
-    return Promise.reject(error.response.data);
-  } else if (error.request) {
-    // The request was made but no response was received
-    console.error("API Error Request:", error.request);
-    return Promise.reject({
-      message: "No response from server. Please check your connection.",
-    });
-  } else {
-    // Something happened in setting up the request
-    console.error("API Error:", error.message);
-    return Promise.reject({ message: error.message });
+// Function to set up auth token on api requests
+export const setupApiAuth = () => {
+  const token = authService.getToken();
+  if (token) {
+    api.defaults.headers.common["Authorization"] = `Bearer ${token}`;
   }
 };
 
-// API service methods
+// Set up auth initially
+setupApiAuth();
+
+// Helper function to handle API errors
+const handleApiError = (error) => {
+  console.error("API Error:", error.response?.data || error.message);
+  throw (
+    error.response?.data || {
+      message: "An error occurred with the API request",
+    }
+  );
+};
+
+// API service functions
 const apiService = {
-  // Get feature definitions for form
+  // Get feature definitions for the prediction form
   getFeatureDefinitions: async () => {
     try {
-      const response = await api.get("/features");
-      return response.data.features;
+      const response = await api.get("/api/features");
+      console.log("Feature definitions response:", response);
+      return response.data.features || response.data;
     } catch (error) {
-      return handleApiError(error);
+      console.error("Error fetching feature definitions:", error);
+      throw (
+        error.response?.data || {
+          message: "Failed to fetch feature definitions",
+        }
+      );
     }
   },
 
   // Submit data for prediction
   makePrediction: async (data) => {
     try {
-      const response = await api.post("/predict", data);
+      const response = await api.post("/api/predict", data);
+      console.log("Prediction response:", response);
       return response.data;
     } catch (error) {
-      return handleApiError(error);
+      console.error("Error making prediction:", error);
+      throw error.response?.data || { message: "Failed to make prediction" };
     }
   },
 
-  // Get model metrics for display
   getModelMetrics: async () => {
     try {
-      const response = await api.get("/metrics");
+      // Add leading slash to ensure correct URL
+      const response = await api.get("/api/metrics");
+      console.log("Model metrics response:", response);
+      console.log("JSON.parse(response.data):", JSON.parse(response.data));
+
+      // Handle string response if needed
+      if (typeof response.data === "string") {
+        console.log("Parsing string response as JSON...");
+        try {
+          return JSON.parse(response.data);
+        } catch (parseError) {
+          console.error("Error parsing metrics JSON:", parseError);
+          throw new Error("Invalid response format");
+        }
+      }
+
+      // Ensure we're returning an array
+      if (Array.isArray(response.data)) {
+        return response.data;
+      } else if (response.data && Array.isArray(response.data.data)) {
+        return response.data.data;
+      } else {
+        console.error("Unexpected response format:", response.data);
+        throw new Error("Response is not an array");
+      }
+    } catch (error) {
+      console.error("Error fetching model metrics:", error);
+      throw (
+        error.response?.data || { message: "Failed to fetch model metrics" }
+      );
+    }
+  },
+
+  // Get user predictions
+  getUserPredictions: async () => {
+    try {
+      const response = await api.get("/api/user/predictions");
+      console.log("User predictions response:", response);
       return response.data;
     } catch (error) {
-      return handleApiError(error);
+      console.error("Error fetching user predictions:", error);
+      throw error.response?.data || { message: "Failed to fetch predictions" };
     }
+  },
+
+  // Get prediction by ID
+  getPredictionById: async (predictionId) => {
+    try {
+      const response = await api.get(`/api/predictions/${predictionId}`);
+      console.log("Prediction by ID response:", response);
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching prediction ${predictionId}:`, error);
+      throw (
+        error.response?.data || {
+          message: "Failed to fetch prediction details",
+        }
+      );
+    }
+  },
+
+  // Get the axios instance
+  getApi: () => {
+    return api;
   },
 };
 
