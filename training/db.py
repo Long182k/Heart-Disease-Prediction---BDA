@@ -40,11 +40,10 @@ def init_db():
         )
         ''')
         
-        # Create predictions table with UUID as primary key (replacing prediction_id)
         cursor.execute('''
         CREATE TABLE IF NOT EXISTS predictions (
             id UUID PRIMARY KEY,
-            user_id UUID REFERENCES users(id),
+            user_id UUID REFERENCES users(id) NOT NULL,
             prediction_result JSONB NOT NULL,
             patient_data JSONB NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

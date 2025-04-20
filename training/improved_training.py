@@ -81,76 +81,124 @@ def load_and_preprocess_data(data_path):
         else:
             raise FileNotFoundError("Could not find data file in any expected location. Please check the dataset path.")
     
-    # Load the data
-    df = pd.read_csv(data_path)
-    print(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns")
-    
-    # Check for missing values
-    missing_values = df.isnull().sum()
-    if missing_values.sum() > 0:
-        print("Missing values found:")
-        print(missing_values[missing_values > 0])
-        # Fill missing values or drop rows with missing values
-        df = df.dropna()
-        print(f"After dropping rows with missing values: {df.shape[0]} rows")
-    
-    # Extract features and target
-    features = [
-        "age", "gender", "height", "weight", "ap_hi", "ap_lo", 
-        "cholesterol", "gluc", "smoke", "alco", "active", 
-        "age_years", "bmi"
-    ]
-    
-    # Check if bp_category_encoded is a string and needs encoding
-    if 'bp_category_encoded' in df.columns:
-        # Check the data type
-        if df['bp_category_encoded'].dtype == 'object':
-            print("Converting bp_category_encoded from string to numeric")
-            # Create a mapping for blood pressure categories
-            bp_category_mapping = {
-                'Normal': 0,
-                'Elevated': 1,
-                'Hypertension Stage 1': 2,
-                'Hypertension Stage 2': 3,
-                'Hypertensive Crisis': 4
-            }
-            
-            # Apply the mapping and create a new numeric column
-            df['bp_category_numeric'] = df['bp_category_encoded'].map(bp_category_mapping)
-            
-            # Check if any values couldn't be mapped (will be NaN)
-            unmapped = df['bp_category_numeric'].isna().sum()
-            if unmapped > 0:
-                print(f"Warning: {unmapped} values in bp_category_encoded couldn't be mapped")
-                # Fill NaN values with a default (e.g., most common category)
-                df['bp_category_numeric'].fillna(df['bp_category_numeric'].mode()[0], inplace=True)
-            
-            # Add the new numeric feature to the features list
-            features.append('bp_category_numeric')
-            print("Added bp_category_numeric to features list")
+    try:
+        # First try to use Spark-based preprocessing from data_preprocessing.py
+        print("Attempting to use Spark-based distributed preprocessing...")
+        from data_preprocessing import preprocess_data
+        X_train, X_test, y_train, y_test = preprocess_data(data_path)
+        
+        # Combine train and test for feature selection and further processing
+        X_combined = np.vstack((X_train, X_test))
+        y_combined = np.concatenate((y_train, y_test))
+        
+        print(f"Successfully processed data with Spark: {X_combined.shape[1]} features")
+        
+        # Load the original data to get feature names
+        df = pd.read_csv(data_path)
+        
+        # Define the expected features
+        features = [
+            "age", "gender", "height", "weight", "ap_hi", "ap_lo", 
+            "cholesterol", "gluc", "smoke", "alco", "active", 
+            "age_years", "bmi"
+        ]
+        
+        # Add bp_category_numeric if available
+        if 'bp_category_encoded' in df.columns:
+            if df['bp_category_encoded'].dtype == 'object':
+                print("Converting bp_category_encoded from string to numeric")
+                bp_category_mapping = {
+                    'Normal': 0,
+                    'Elevated': 1,
+                    'Hypertension Stage 1': 2,
+                    'Hypertension Stage 2': 3,
+                    'Hypertensive Crisis': 4
+                }
+                df['bp_category_numeric'] = df['bp_category_encoded'].map(bp_category_mapping)
+                features.append('bp_category_numeric')
+            else:
+                features.append('bp_category_encoded')
+        
+        # Create a DataFrame with the combined data
+        X_df = pd.DataFrame(X_combined, columns=[f"feature_{i}" for i in range(X_combined.shape[1])])
+        
+        # Return the preprocessed data and feature names
+        return X_df, y_combined, features
+        
+    except Exception as e:
+        print(f"Spark preprocessing failed: {str(e)}")
+        print("Falling back to pandas-based preprocessing...")
+        
+        # Load the data
+        df = pd.read_csv(data_path)
+        print(f"Loaded dataset with {df.shape[0]} rows and {df.shape[1]} columns")
+        
+        # Check for missing values
+        missing_values = df.isnull().sum()
+        if missing_values.sum() > 0:
+            print("Missing values found:")
+            print(missing_values[missing_values > 0])
+            # Fill missing values or drop rows with missing values
+            df = df.dropna()
+            print(f"After dropping rows with missing values: {df.shape[0]} rows")
+        
+        # Extract features and target
+        features = [
+            "age", "gender", "height", "weight", "ap_hi", "ap_lo", 
+            "cholesterol", "gluc", "smoke", "alco", "active", 
+            "age_years", "bmi"
+        ]
+        
+        # Check if bp_category_encoded is a string and needs encoding
+        if 'bp_category_encoded' in df.columns:
+            # Check the data type
+            if df['bp_category_encoded'].dtype == 'object':
+                print("Converting bp_category_encoded from string to numeric")
+                # Create a mapping for blood pressure categories
+                bp_category_mapping = {
+                    'Normal': 0,
+                    'Elevated': 1,
+                    'Hypertension Stage 1': 2,
+                    'Hypertension Stage 2': 3,
+                    'Hypertensive Crisis': 4
+                }
+                
+                # Apply the mapping and create a new numeric column
+                df['bp_category_numeric'] = df['bp_category_encoded'].map(bp_category_mapping)
+                
+                # Check if any values couldn't be mapped (will be NaN)
+                unmapped = df['bp_category_numeric'].isna().sum()
+                if unmapped > 0:
+                    print(f"Warning: {unmapped} values in bp_category_encoded couldn't be mapped")
+                    # Fill NaN values with a default (e.g., most common category)
+                    df['bp_category_numeric'].fillna(df['bp_category_numeric'].mode()[0], inplace=True)
+                
+                # Add the new numeric feature to the features list
+                features.append('bp_category_numeric')
+                print("Added bp_category_numeric to features list")
+            else:
+                # If it's already numeric, just add it to the features
+                features.append('bp_category_encoded')
         else:
-            # If it's already numeric, just add it to the features
-            features.append('bp_category_encoded')
-    else:
-        print("Warning: bp_category_encoded not found in dataset")
-    
-    # Ensure all required features are in the dataset
-    missing_features = [f for f in features if f not in df.columns]
-    if missing_features:
-        print(f"Warning: The following features are missing from the dataset: {missing_features}")
-        features = [f for f in features if f in df.columns]
-    
-    # Select only the required features and target
-    X = df[features]
-    y = df['cardio']
-    
-    # Check class balance
-    class_counts = y.value_counts()
-    print("Class distribution:")
-    print(class_counts)
-    
-    # Return the preprocessed data
-    return X, y, features
+            print("Warning: bp_category_encoded not found in dataset")
+        
+        # Ensure all required features are in the dataset
+        missing_features = [f for f in features if f not in df.columns]
+        if missing_features:
+            print(f"Warning: The following features are missing from the dataset: {missing_features}")
+            features = [f for f in features if f in df.columns]
+        
+        # Select only the required features and target
+        X = df[features]
+        y = df['cardio']
+        
+        # Check class balance
+        class_counts = y.value_counts()
+        print("Class distribution:")
+        print(class_counts)
+        
+        # Return the preprocessed data
+        return X, y, features
 
 def perform_feature_selection(X, y, features, method='rfe', n_features=10):
     """Perform feature selection to identify the most important features."""
