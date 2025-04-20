@@ -27,16 +27,29 @@ env/
 ENV/
 virtualenv/
 .venv/
+.flask_venv/
+flask_venv/
 .env/
-
+/webapp/.env
+myenv/
+*.zip
+*.env
+webapp/.env
+webapp/.env/
 # Models and data
 models/
+models_2/
+models_3_colabs/
+models_improved/
+plots/
 *.model
 *.pkl
 *.h5
 *.pt
 *.pth
 *.onnx
+
+data/
 
 # Jupyter Notebook
 .ipynb_checkpoints
